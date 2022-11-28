@@ -33,6 +33,7 @@ extern crate serde_json;
 ///
 /// JWK key type enum
 ///
+#[derive(Clone, Debug, Deserialize)]
 pub enum KeyType {
   RSA,
 }
@@ -40,6 +41,7 @@ pub enum KeyType {
 ///
 /// Key algorithms
 ///
+#[derive(Clone, Debug, Deserialize)]
 pub enum KeyAlgorithm {
   RSA256,
 }
@@ -49,6 +51,7 @@ pub enum KeyAlgorithm {
 ///
 /// For a description of the members, see [RFC7517](https://www.rfc-editor.org/rfc/rfc7517).
 ///
+#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWK {
   kty: KeyType,
@@ -59,6 +62,14 @@ pub struct JWK {
 }
 
 ///
+/// JSON Web Key Set
+///
+#[derive(Clone, Debug, Deserialize)]
+pub struct JWKS {
+  keys: Vec<JWK>
+}
+
+///
 /// JWK key store.
 ///
 /// This is basically a thin wrapper around JSON web key sets that adds loading/updating
@@ -66,9 +77,7 @@ pub struct JWK {
 ///
 pub struct KeyStore {
   /// List of keys in this store.
-  /// Because the the `kid` field of JWKs is optional, this is a vector rather than a map.
-  /// I naively assume that we do not need an index, since I do not expect many keys in the store.
-  keys: Vec<JWK>,
+  keys: JWKS,
   /// The URL the key set is loaded from.
   url: String,
   /// The time the keys were last loaded from `url`.
@@ -79,13 +88,13 @@ pub struct KeyStore {
   expire_time: Option<SystemTime>,
 }
 
-
-impl Keystore {
+#[allow(dead_code)]
+impl KeyStore {
 
   ///
   /// Return current keyset.
   ///
-  pub fn keyset(&self) -> &Vec<JWK> {
+  pub fn keyset(&self) -> &JWKS {
     return &self.keys;
   }
 
@@ -103,24 +112,173 @@ impl Keystore {
     let mut expire_time: Option<SystemTime> = None;
 
     /* get expiration time from cache-control HTTP header field */
-    if let Ok(value) = KeyStore::cache_max_age(&mut response) {
+    if let Ok(value) = KeyStore::get_key_expiration_time(&mut response) {
       expire_time = Some(load_time + Duration::new(value, 0));
     }
 
+    /* load JWKS from URL */
     let json = response
       .text()
-      .await?;
+      .await
+      .map_err(|e| BBError::NetworkError(format!("Failed to load public key set: {:?}", e)))?;
 
-    self.keyset = JwkSet::from_bytes(
-      response
-        .bytes()
-        .await
-        .map_err(|e| BBError::Other(format!("Failed to read keyset response: {}", e)))?
-    )
-      .map_err(|e| BBError::Other(format!("Failed to read IdP keyset: {:?}", e)))?;
+    /* deserialize JSON into our JWKS struct */
+    let jwks: JWKS = serde_json::from_str(&json)
+      .map_err(|e| BBError::Other(format!("Failed to parse IdP public key set: {:?}", e)))?;
+
+
+
 
     Ok(())
 
   }
+
+  ///
+  /// Get key expiration time from the cache-control HTTP header.
+  ///
+  /// # Arguments
+  ///
+  /// `response` - response to read the cache-control HTTP header from
+  ///
+  fn get_key_expiration_time(response: &mut reqwest::Response) -> Result<u64, ()> {
+    let header = response.headers().get("cache-control").ok_or(())?;
+    let cache_control = header.to_str().map_err(|_| ())?.to_lowercase();
+    assigned_header_value(&cache_control, "max-age")
+  }
+
+  ///
+  /// Determine the URL where public keys can be loaded.
+  ///
+  /// OpenID Connect IdPs provide an info endpoint called OpenID Connect Discovery that
+  /// returns, among other info, the URL where the IdP's public keys (JWKS) are downloadable.
+  /// These public keys are used to validate ID Tokens (i.e. JWTs) issued by this IdP.
+  ///
+  /// This function returns the public keys URL read from the discovery endpoint.
+  ///
+  /// OpenID Connect providers might use different schemas for this URL; for Keycloak, the URL
+  /// is built like this:
+  ///
+  /// `https://host.tld/realms/<realm_name>/.well-known/openid-configuration`
+  ///
+  /// # Arguments
+  /// `idp_discovery_url` - the URL to load the discovery info from.
+  ///
+  ///
+  pub async fn idp_certs_url(idp_discovery_url: &str) -> BBResult<String> {
+    let info_json = reqwest::get(idp_discovery_url)
+      .await
+      .map_err(|e| BBError::NetworkError(
+        format!("Failed to load IdP discovery info JSON from {}: {:?}",
+                idp_discovery_url, e)
+      ))?
+      .text()
+      .await
+      .map_err(|e| BBError::NetworkError(format!("Failed to get IdP discovery info JSON: {:?}", e)))?;
+
+    let info: serde_json::Value = serde_json::from_str(&info_json)
+      .map_err(|e| {
+        BBError::Other(
+          format!("Invalid JSON from IdP discovery info url '{}': {:?}", idp_discovery_url, e)
+        )
+      })?;
+
+    if let serde_json::Value::String(jwks_uri) = &info["jwks_uri"] {
+      Ok(jwks_uri.to_string())
+    } else {
+      Err(BBError::Other("No jwks_uri in IdP discovery info found".to_string()))
+    }
+  }
+
+}
+
+
+///
+/// Return a numeric value from a HTTP header field with assigned name.
+///
+/// Example:
+///
+/// Assuming a `hdr_value` of 'Cache-Control: max-age = 45678,never-die' and `name` = 'max-age',
+/// this function returns 45678.
+///
+/// # Arguments
+/// `hdr_value` - the header value (or string) to search for an assigned value
+/// `name` - the name to look for before the assignment '='
+///
+fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
+  /* search name */
+  let mut p = hdr_value.find(name).ok_or(())?;
+  p += name.len();
+  let mut num = String::with_capacity(22); // max byte length of a 64bit number
+  let mut got_ass = false;
+  let mut chars = hdr_value.get(p..).unwrap().chars();
+
+  while let Some(c) = chars.next() {
+    match c {
+      '=' => {
+        got_ass = true;
+      },
+
+      c => {
+        if !got_ass {
+          continue;
+        }
+
+        if c.is_numeric() {
+          num.push(c);
+        } else {
+          if !num.is_empty() {
+            /* No digit, but already saw a digit, stop here */
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if num.is_empty() {
+    return Err(())
+  }
+
+  let value: u64 = num.parse().map_err(|_| ())?;
+  Ok(value)
+
+}
+
+
+
+#[cfg(test)]
+
+mod tests {
+
+  use super::*;
+
+  #[test]
+  fn test_header_value_parser() {
+    let test_strings = vec![
+      "oriuehgueohgeor depp = 3485975dd",
+      "depp=1,fellow",
+      "depp = 22-dude",
+      "r depp=12345678",
+      "xu depp=666"
+    ];
+    let results: Vec<u64> = vec![
+      3485975,
+      1,
+      22,
+      12345678,
+      666
+    ];
+
+    /* check a couple of strings */
+    for i in 0..test_strings.len() {
+      assert!(assigned_header_value(test_strings[i], "depp").unwrap() == results[i]);
+    }
+
+    /* nonsense string must return error */
+    assert!(assigned_header_value("orihgeorgohoho", "name").is_err());
+
+  }
+
+
 
 }
