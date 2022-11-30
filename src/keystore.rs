@@ -21,12 +21,12 @@
 
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
+use url::Url;
 
 extern crate base64;
 extern crate openssl;
 extern crate serde;
 extern crate serde_json;
-
 
 /* --- types ------------------------------------------------------------------------------------ */
 
@@ -77,7 +77,7 @@ pub struct JWKS {
 ///
 pub struct KeyStore {
   /// List of keys in this store.
-  keys: JWKS,
+  keyset: JWKS,
   /// The URL the key set is loaded from.
   url: String,
   /// The time the keys were last loaded from `url`.
@@ -95,7 +95,7 @@ impl KeyStore {
   /// Return current keyset.
   ///
   pub fn keyset(&self) -> &JWKS {
-    return &self.keys;
+    return &self.keyset;
   }
 
   ///
@@ -187,6 +187,43 @@ impl KeyStore {
     } else {
       Err(BBError::Other("No jwks_uri in IdP discovery info found".to_string()))
     }
+  }
+
+
+  ///
+  /// Construct Keycloak specific discovery URL from a host and realm name.
+  ///
+  /// Provided for convenience :-)
+  ///
+  /// # Arguments
+  ///
+  /// `host` - protocol and host name of the Keycloak server, e.g. "https://idp.domain.tld"
+  /// `realm` - the realm name
+  ///
+  /// # Returns
+  ///
+  /// URL of discovery endpoint.
+  ///
+  pub fn keycloak_discovery_url(host: &str, realm: &str) -> BBResult<String> {
+    let mut info_url = Url::parse(host).map_err(|e| {
+      BBError::Other(format!("Invalid base URL for Keycloak discovery endpoint: {:?}", e))
+    })?;
+
+    /* Discovery info URL is built like this:
+     * https://<host>/realms/<realm_name>/.well-known/openid-configuration
+     */
+    info_url
+      .path_segments_mut()
+      .map_err(|_| {
+        BBError::Other(format!("Invalid IdP URL '{}'", host))
+      })?
+      .push("realms")
+      .push(realm)
+      .push(".well-known")
+      .push("openid-configuration");
+
+    Ok(info_url.to_string())
+
   }
 
 }
