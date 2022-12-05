@@ -33,7 +33,7 @@ extern crate serde_json;
 /* --- constants -------------------------------------------------------------------------------- */
 
 /// Refresh interval factor; the lifetime of keys etc. is multiplied with this factor
-/// to determine the time of the next refresh attempt.
+/// to determine the point in time after which the information is considered outdated.
 pub const REFRESH_INTERVAL_FACTOR: f64 = 0.75;
 
 
@@ -426,6 +426,10 @@ fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
 mod tests {
 
   use super::*;
+  use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+  /// Seconds since UNIX_EPOCH in the very far future (~1000 years)
+  const NEVER_SECONDS: u64 = 33206263475;
 
   #[test]
   ///
@@ -434,12 +438,13 @@ mod tests {
   fn test_keycloak_discovery_url() {
     /* Very simple, if not pathetic, test. Runs without accessing any keycloak instance :-) */
     let url = KeyStore::keycloak_discovery_url("https://host.tld", "testing");
-    assert_eq!(url, "https://host.id/realms/testing/.well-known/openid-configuration")
+    assert_eq!(url.unwrap(), "https://host.tld/realms/testing/.well-known/openid-configuration")
   }
 
   ///
   /// Test for `assigned_header_value` function
   ///
+  #[test]
   fn test_header_value_parser() {
     let test_strings = vec![
       "oriuehgueohgeor depp = 3485975dd",

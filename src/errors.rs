@@ -18,7 +18,7 @@ pub type BBResult<T> = Result<T, BBError>;
 /// Errors used in bbjwt
 ///
 #[allow(dead_code)]
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum BBError {
 
   #[error("Network/load error: {0}")]
