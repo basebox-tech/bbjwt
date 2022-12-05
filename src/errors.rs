@@ -22,15 +22,19 @@ pub type BBResult<T> = Result<T, BBError>;
 pub enum BBError {
 
   #[error("Network/load error: {0}")]
+  /// Some network communication failed.
   NetworkError(String),
 
   #[error("Token validation failed: {0}")]
+  /// Token validation failed.
   TokenInvalid(String),
 
   #[error("Error: {0}")]
+  /// Some other error.
   Other(String),
 
   #[error("Unknown/unspecified error")]
+  /// Something went wrong for an unknown reason; should never be used :-)
   Unknown,
 
 }

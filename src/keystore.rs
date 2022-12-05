@@ -10,6 +10,8 @@
 //! functionality, so the user is responsible to call this update entry point at certain
 //! intervals.
 //!
+//! Some parts of this code inspired/taken from [jwksclient2](https://github.com/ammarzuberi/jwksclient2).
+//!
 //! Author: Markus Thielen <markus.thielen@basebox.tech>
 //!
 //! Copyright (c) 2022 basebox GmbH, all rights reserved.
@@ -28,7 +30,14 @@ extern crate openssl;
 extern crate serde;
 extern crate serde_json;
 
-/* --- types ------------------------------------------------------------------------------------ */
+/* --- constants -------------------------------------------------------------------------------- */
+
+/// Refresh interval factor; the lifetime of keys etc. is multiplied with this factor
+/// to determine the time of the next refresh attempt.
+pub const REFRESH_INTERVAL_FACTOR: f64 = 0.75;
+
+
+/* --- types ------------------------------------------------------------------b------------------ */
 
 ///
 /// JWK key type enum
@@ -54,10 +63,15 @@ pub enum KeyAlgorithm {
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWK {
+  /// Key type; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.1)
   kty: KeyType,
+  /// Algorithm; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.4)
   alg: Option<KeyAlgorithm>,
+  /// Key id; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.5)
   kid: Option<String>,
+  /// RSA modules; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-9.3)
   n: String,
+  /// RSA exponent
   e: String,
 }
 
@@ -79,7 +93,7 @@ pub struct KeyStore {
   /// List of keys in this store.
   keyset: JWKS,
   /// The URL the key set is loaded from.
-  url: String,
+  url: Option<String>,
   /// The time the keys were last loaded from `url`.
   load_time: Option<SystemTime>,
   /// Refresh interval factor; if .7, keys are considered expired if 70% of their lifetime is over
@@ -88,8 +102,50 @@ pub struct KeyStore {
   expire_time: Option<SystemTime>,
 }
 
+
+impl JWKS {
+
+  ///
+  /// Create new empty keyset.
+  ///
+  pub fn new() -> Self {
+    return JWKS {
+      keys: vec![]
+    }
+  }
+
+}
+
+
 #[allow(dead_code)]
 impl KeyStore {
+
+  ///
+  /// Create new keyset.
+  ///
+  /// If `url` is some, keys will be loaded from this URL; otherwise, the returned
+  /// keystore will have an empty keyset.
+  ///
+  /// # Arguments
+  ///
+  /// `url`: optional URL to load the keys from.
+  ///
+  pub async fn new(url: Option<&str>) -> BBResult<Self> {
+    let mut ks = KeyStore {
+      keyset: JWKS::new(),
+      url: url.map(String::from),
+      load_time: None,
+      refresh_interval: REFRESH_INTERVAL_FACTOR,
+      expire_time: None,
+    };
+
+    /* load keys from URL if applicable */
+    if url.is_some() {
+      ks.load_keys().await?;
+    }
+
+   Ok(ks)
+  }
 
   ///
   /// Return current keyset.
@@ -99,22 +155,97 @@ impl KeyStore {
   }
 
   ///
+  /// Number of keys in keystore.
+  ///
+  pub fn keys_len(&self) -> usize {
+    self.keyset.keys.len()
+  }
+
+  ///
+  /// Manually add a key to the keystore.
+  ///
+  /// # Arguments
+  /// `key_json` - JWT string; a JSON string containing a key.
+  ///
+  pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
+    let key = serde_json::from_str(key_json)
+      .map_err(|e| {
+        BBError::Other(format!("Failed to parse key JSON: {:?}", e))
+      })?;
+    self.keyset.keys.push(key);
+    Ok(())
+  }
+
+  ///
+  /// Retrieve a key by id.
+  ///
+  /// The `kid` claim is optional, so the keyset may contain keys without id.
+  /// This is why the `kid` argument to this function is optional, too. If it is
+  /// None, we use the first key, assuming that there is only one. This
+  /// complies to the rules set by the OpenID Connect spec, defined
+  /// [here](https://openid.net/specs/openid-connect-core-1_0.html#SigEnc)
+  ///
+  /// # Arguments
+  /// `kid` - the ID of the key. If None, the first key is returned.
+  ///
+  pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<JWK> {
+
+    let key = if kid.is_none() {
+      /* return first key in set */
+      self.keyset.keys.first().ok_or_else(|| {
+        BBError::Other("No keys in keyset".to_string())
+      })?
+    } else {
+      /* return key with specific ID */
+      let kid = kid.unwrap();
+      let key = self.keyset.keys.iter().find(|k: &&JWK| {
+        if let Some(this_kid) = &k.kid {
+          return this_kid.eq(kid);
+        } else {
+          return false;
+        }
+      });
+      key.ok_or_else(|| BBError::Other(format!("Could not find kid '{}' in keyset.", kid)))?
+    };
+
+    Ok(key.clone())
+  }
+
+  ///
+  /// Specify the interval (as a fraction) when the key store should refresh it's key.
+  ///
+  /// The default is 0.75, meaning that keys should be refreshed when we are 3/4 through
+  /// the expiration time (similar to DHCP).
+  ///
+  /// This method does **not** update the refresh time. Call `load_keys` to force an update on
+  /// the refresh time property.
+  pub fn set_refresh_interval(&mut self, interval: f64) {
+    self.refresh_interval = interval;
+  }
+
+  ///
+  /// Get the current fraction time to check for token refresh time.
+  ///
+  pub fn refresh_interval(&self) -> f64 {
+    self.refresh_interval
+  }
+
+
+  ///
   /// Load/update keys from the keystore URL.
   ///
   pub async fn load_keys(&mut self) -> BBResult<()> {
-    let mut response = reqwest::get(&self.url)
+    let url = self.url
+      .clone()
+      .ok_or_else(|| BBError::Other("No load URL for keyset provided.".to_string()))?;
+    let mut response = reqwest::get(&url)
       .await
       .map_err(|e| {
         BBError::Other(format!("Failed to load IdP keyset: {:?}", e))
       })?;
 
-    let load_time = SystemTime::now();
-    let mut expire_time: Option<SystemTime> = None;
-
-    /* get expiration time from cache-control HTTP header field */
-    if let Ok(value) = KeyStore::get_key_expiration_time(&mut response) {
-      expire_time = Some(load_time + Duration::new(value, 0));
-    }
+    /* get expiration/life time from cache-control HTTP header field */
+    let lifetime = KeyStore::get_key_expiration_time(&mut response);
 
     /* load JWKS from URL */
     let json = response
@@ -123,14 +254,21 @@ impl KeyStore {
       .map_err(|e| BBError::NetworkError(format!("Failed to load public key set: {:?}", e)))?;
 
     /* deserialize JSON into our JWKS struct */
-    let jwks: JWKS = serde_json::from_str(&json)
+    self.keyset = serde_json::from_str(&json)
       .map_err(|e| BBError::Other(format!("Failed to parse IdP public key set: {:?}", e)))?;
 
+    /* update load time and expiration time */
+    let load_time = SystemTime::now();
+    if let Ok(value) = lifetime {
+      let seconds: u64 = (value as f64 * self.refresh_interval) as u64;
+      self.expire_time = Some(load_time + Duration::new(seconds, 0));
+    }
 
-
+    if self.load_time.is_none() {
+      self.load_time = Some(load_time);
+    }
 
     Ok(())
-
   }
 
   ///
@@ -290,6 +428,18 @@ mod tests {
   use super::*;
 
   #[test]
+  ///
+  /// Test for `keycloak_discovery_url`
+  ///
+  fn test_keycloak_discovery_url() {
+    /* Very simple, if not pathetic, test. Runs without accessing any keycloak instance :-) */
+    let url = KeyStore::keycloak_discovery_url("https://host.tld", "testing");
+    assert_eq!(url, "https://host.id/realms/testing/.well-known/openid-configuration")
+  }
+
+  ///
+  /// Test for `assigned_header_value` function
+  ///
   fn test_header_value_parser() {
     let test_strings = vec![
       "oriuehgueohgeor depp = 3485975dd",

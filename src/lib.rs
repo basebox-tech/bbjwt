@@ -1,11 +1,11 @@
 //!
-//! JWT validation library for basebox (and maybe others :-) )
+//! JWT validation library for [basebox](https://basebox.tech) (and maybe others :-) )
 //!
 //! # Synopsis
 //!
 //! This lib was created to provide a straight forward, simple and reliable way to validate
 //! JWTs against a set of public keys loaded from a URL.
-//! We use it to validate OpenID Connect ID Tokens (which are JWTs) using the set of public
+//! We at basebox use it to validate OpenID Connect ID Tokens (which are JWTs) using the set of public
 //! keys published by the OpenID server (e.g. Keycloak).
 //!
 //! It provides the following features:
@@ -29,7 +29,8 @@
 //! ## Why yet another Rust JWT lib?
 //!
 //! If you ever had tried to use one of the existing libraries to do JWT validation you would
-//! not ask this question.
+//! not ask this question. In short, the other Rust libraries I have tried are cumbersome to use
+//! and lack documentation.
 //!
 //! Author: Markus Thielen <markus.thielen@basebox.tech>
 //!
@@ -48,8 +49,8 @@ extern crate serde_derive;
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
-mod keystore;
-mod errors;
+pub mod keystore;
+pub mod errors;
 
 
 /* --- types ------------------------------------------------------------------------------------ */
