@@ -5,8 +5,8 @@
 //!
 //! This lib was created to provide a straight forward, simple and reliable way to validate
 //! JWTs against a set of public keys loaded from a URL.
-//! We at basebox use it to validate OpenID Connect ID Tokens (which are JWTs) using the set of public
-//! keys published by the OpenID server (e.g. Keycloak).
+//! We at [basebox](https://basebox.tech) use it to validate OpenID Connect ID Tokens (which are JWTs)
+//! using the set of public keys published by the OpenID server (e.g. Keycloak).
 //!
 //! It provides the following features:
 //!
@@ -28,11 +28,10 @@
 //!
 //! ## Why yet another Rust JWT lib?
 //!
-//! If you ever had tried to use one of the existing libraries to do JWT validation you would
+//! If you ever had tried to use one of the existing libraries to do JWT validation you probably would
 //! not ask this question. In short, the other Rust libraries I have tried are cumbersome to use
 //! and lack documentation.
 //!
-//! Author: Markus Thielen <markus.thielen@basebox.tech>
 //!
 //! Copyright (c) 2022 basebox GmbH, all rights reserved.
 //!

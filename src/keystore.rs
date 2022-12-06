@@ -12,8 +12,6 @@
 //!
 //! Some parts of this code inspired/taken from [jwksclient2](https://github.com/ammarzuberi/jwksclient2).
 //!
-//! Author: Markus Thielen <markus.thielen@basebox.tech>
-//!
 //! Copyright (c) 2022 basebox GmbH, all rights reserved.
 //!
 //! License: MIT
@@ -32,9 +30,10 @@ extern crate serde_json;
 
 /* --- constants -------------------------------------------------------------------------------- */
 
-/// Refresh interval factor; the lifetime of keys etc. is multiplied with this factor
+/// Reload interval factor; the lifetime of keys etc. is multiplied with this factor
 /// to determine the point in time after which the information is considered outdated.
-pub const REFRESH_INTERVAL_FACTOR: f64 = 0.75;
+/// See [`KeyStore::set_reload_factor`] for more info.
+pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 
 
 /* --- types ------------------------------------------------------------------b------------------ */
@@ -97,10 +96,11 @@ pub struct KeyStore {
   url: Option<String>,
   /// The time the keys were last loaded from `url`.
   load_time: Option<SystemTime>,
-  /// Refresh interval factor; if .7, keys are considered expired if 70% of their lifetime is over
-  refresh_interval: f64,
-  /// Expiration time.
-  expire_time: Option<SystemTime>,
+  /// Reload interval factor; if .7, keys are considered expired if 70% of their lifetime is over.
+  /// See [`KeyStore::set_reload_factor`] for more info.
+  reload_factor: f64,
+  /// Time at which keys should be reloaded.
+  reload_time: Option<SystemTime>,
 }
 
 
@@ -118,7 +118,6 @@ impl JWKS {
 }
 
 impl Default for JWKS {
-
   fn default() -> Self {
     Self::new()
   }
@@ -143,8 +142,8 @@ impl KeyStore {
       keyset: JWKS::new(),
       url: url.map(String::from),
       load_time: None,
-      refresh_interval: REFRESH_INTERVAL_FACTOR,
-      expire_time: None,
+      reload_factor: RELOAD_INTERVAL_FACTOR,
+      reload_time: None,
     };
 
     /* load keys from URL if applicable */
@@ -173,7 +172,7 @@ impl KeyStore {
   /// Manually add a key to the keystore.
   ///
   /// # Arguments
-  /// `key_json` - JWT string; a JSON string containing a key.
+  /// `key_json` - JSON string containing a [`JWK`].
   ///
   pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
     let key = serde_json::from_str(key_json)
@@ -191,7 +190,7 @@ impl KeyStore {
   /// This is why the `kid` argument to this function is optional, too. If it is
   /// None, we use the first key, assuming that there is only one. This
   /// complies to the rules set by the OpenID Connect spec, defined
-  /// [here](https://openid.net/specs/openid-connect-core-1_0.html#SigEnc)
+  /// [here](https://openid.net/specs/openid-connect-core-1_0.html#SigEnc).
   ///
   /// # Arguments
   /// `kid` - the ID of the key. If None, the first key is returned.
@@ -220,27 +219,79 @@ impl KeyStore {
   }
 
   ///
-  /// Specify the interval (as a fraction) when the key store should refresh it's key.
+  /// Specify the interval factor to determine when the key store should reload its keys.
   ///
-  /// The default is 0.75, meaning that keys should be refreshed when we are 3/4 through
-  /// the expiration time (similar to DHCP).
+  /// The default is 0.75, meaning that keys should be reloaded when we are 3/4 through
+  /// the expiration time (similar to DHCP). For example if the server tells us that the
+  /// keys expire in 10 minutes, setting the reload interval to 0.75 will consider the keys
+  /// to be expired after 7.5 minutes and the [`KeyStore::should_reload`] function returns true.
   ///
-  /// This method does **not** update the refresh time. Call `load_keys` to force an update on
-  /// the refresh time property.
-  pub fn set_refresh_interval(&mut self, interval: f64) {
-    self.refresh_interval = interval;
+  /// This method does **not** update the reload time. Call [`load_keys`] to force an update.
+  ///
+  pub fn set_reload_factor(&mut self, interval: f64) {
+    self.reload_factor = interval;
   }
 
   ///
-  /// Get the current fraction time to check for token refresh time.
+  /// Get the current fraction time to check for token reload time.
   ///
-  pub fn refresh_interval(&self) -> f64 {
-    self.refresh_interval
+  pub fn reload_factor(&self) -> f64 {
+    self.reload_factor
   }
 
+
+  ///
+  /// Get the time at which the keys were initially loaded.
+  ///
+  /// # Returns
+  ///
+  /// Tine of initial load or None if the keys were never loaded.
+  ///
+  pub fn load_time(&self) -> Option<SystemTime> {
+    self.load_time
+  }
+
+  ///
+  /// Get the time at which the keys should be reloaded.
+  ///
+  /// See [`KeyStore::set_reload_factor`] for more info.
+  ///
+  pub fn reload_time(&self) -> Option<SystemTime> {
+    self.reload_time
+  }
+
+  ///
+  /// Check if keys are expired based on the given `time`.
+  ///
+  /// # Returns
+  /// * Some(true) if keys should be reloaded.
+  /// * Some(false) if keys need not to be reloaded
+  /// * None if the key store does not have a reload time available. For example, the
+  ///    [`KeyStore::load_keys`] function was not called or the HTTP server did not provide a
+  ///    cache-control HTTP header.
+  ///
+  pub fn should_reload_time(&self, time: SystemTime) -> Option<bool> {
+    self.reload_time.map(|reload_time| reload_time <= time)
+  }
+
+  ///
+  /// Check if keys are expired based on the current system time.
+  ///
+  /// # Returns
+  /// * Some(true) if keys should be reloaded.
+  /// * Some(false) if keys need not to be reloaded
+  /// * None if the key store does not have a reload time available. For example, the
+  ///   [`KeyStore::load_keys`] function was not called or the HTTP server did not provide a
+  ///   cache-control HTTP header.
+  ///
+  pub fn should_reload(&self) -> Option<bool> {
+    self.should_reload_time(SystemTime::now())
+  }
 
   ///
   /// Load/update keys from the keystore URL.
+  ///
+  /// Clients should call this function when [`KeyStore::should_reload`] returns true.
   ///
   pub async fn load_keys(&mut self) -> BBResult<()> {
     let url = self.url
@@ -268,8 +319,8 @@ impl KeyStore {
     /* update load time and expiration time */
     let load_time = SystemTime::now();
     if let Ok(value) = lifetime {
-      let seconds: u64 = (value as f64 * self.refresh_interval) as u64;
-      self.expire_time = Some(load_time + Duration::new(seconds, 0));
+      let seconds: u64 = (value as f64 * self.reload_factor) as u64;
+      self.reload_time = Some(load_time + Duration::new(seconds, 0));
     }
 
     if self.load_time.is_none() {
@@ -343,7 +394,7 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `host` - protocol and host name of the Keycloak server, e.g. "https://idp.domain.tld"
+  /// `host` - protocol and host name of the Keycloak server, e.g. <https://idp.domain.tld>
   /// `realm` - the realm name
   ///
   /// # Returns
@@ -554,8 +605,8 @@ mod tests {
 
     /* test for expiration time */
     assert!(ks.load_time.is_some());
-    assert!(ks.expire_time.is_some());
-    assert!(ks.expire_time.unwrap() > ks.load_time.unwrap());
+    assert!(ks.reload_time.is_some());
+    assert!(ks.reload_time.unwrap() > ks.load_time.unwrap());
 
     println!("KeyStore: {:?}", ks);
 

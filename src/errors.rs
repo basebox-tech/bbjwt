@@ -1,7 +1,6 @@
 //!
 //! Error definitions for bbjwt.
 //!
-//! Author: Markus Thielen <markus.thielen@basebox.tech>
 //! Copyright (c) 2022 basebox GmbH
 //!
 
