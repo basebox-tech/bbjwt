@@ -513,12 +513,24 @@ mod tests {
     let mut data = String::new();
     file.read_to_string(&mut data).unwrap();
 
-    /* add key to store */
-    ks.add_key(&data).expect("Failed to add key to store");
+    /* add key to store 20 times */
+    for i in 1..21 {
+      /* add keys with patched kid */
+      ks.add_key(
+        &data.replace("nOo3ZDrODXEK1jKWhXslHR_KXEg",
+                      format!("bbjwt-test-{}", i).as_str()))
+        .expect("Failed to add key to keystore");
+    }
+
+    assert_eq!(ks.keys_len(), 20);
 
     /* get first key */
     let key1 = ks.key_by_id(None).expect("Failed to get key just added");
-    assert!(key1.kid.unwrap() == "nOo3ZDrODXEK1jKWhXslHR_KXEg");
+    assert!(key1.kid.unwrap() == "bbjwt-test-1");
+
+    /* get some other key */
+    let k = ks.key_by_id(Some("bbjwt-test-17")).expect("Failed to get key by ID");
+    assert_eq!(k.kid.unwrap(), "bbjwt-test-17");
 
   }
 
@@ -547,12 +559,18 @@ mod tests {
 
     /* get a random key from the keyset */
     let key = ks.keyset().keys.choose(&mut rand::thread_rng()).expect("Failed to get random key from keyset");
-    /* get its key and try to get it from the store by key id */
+    /* get its key id and try to get it from the store by key id */
     let kid = key.kid.clone().expect("No kid in key; not an error, but spoils this test...");
     let k = ks.key_by_id(Some(&kid)).expect("Failed to get key by id");
+    assert_eq!(k.kid.expect("Missing kid"), kid);
+
+    /* get the first key */
+    let k1 = ks.keyset().keys.first().expect("Failed to get first key").clone();
 
     /* get key without id; must return the first/something */
     let k = ks.key_by_id(None).expect("No key returned without kid");
-
+    /* kid must match the kid of the first key */
+    assert_eq!(k.kid.unwrap().as_str(), k1.kid.unwrap().as_str());
   }
+
 }
