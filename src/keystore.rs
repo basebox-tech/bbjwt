@@ -110,11 +110,18 @@ impl JWKS {
   /// Create new empty keyset.
   ///
   pub fn new() -> Self {
-    return JWKS {
+    JWKS {
       keys: vec![]
     }
   }
 
+}
+
+impl Default for JWKS {
+
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 
@@ -152,7 +159,7 @@ impl KeyStore {
   /// Return current keyset.
   ///
   pub fn keyset(&self) -> &JWKS {
-    return &self.keyset;
+    &self.keyset
   }
 
   ///
@@ -191,22 +198,22 @@ impl KeyStore {
   ///
   pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<JWK> {
 
-    let key = if kid.is_none() {
-      /* return first key in set */
-      self.keyset.keys.first().ok_or_else(|| {
-        BBError::Other("No keys in keyset".to_string())
-      })?
-    } else {
-      /* return key with specific ID */
-      let kid = kid.unwrap();
+    let key = if let Some(kid) = kid {
+      /* `kid` is Some; return key with specific ID */
       let key = self.keyset.keys.iter().find(|k: &&JWK| {
         if let Some(this_kid) = &k.kid {
-          return this_kid.eq(kid);
+          this_kid.eq(kid)
         } else {
-          return false;
+          false
         }
       });
       key.ok_or_else(|| BBError::Other(format!("Could not find kid '{}' in keyset.", kid)))?
+
+    } else {
+      /* `kid` is None; return first key in set */
+      self.keyset.keys.first().ok_or_else(|| {
+        BBError::Other("No keys in keyset".to_string())
+      })?
     };
 
     Ok(key.clone())
@@ -386,9 +393,9 @@ fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
   p += name.len();
   let mut num = String::with_capacity(22); // max byte length of a 64bit number
   let mut got_ass = false;
-  let mut chars = hdr_value.get(p..).unwrap().chars();
+  let chars = hdr_value.get(p..).unwrap().chars();
 
-  while let Some(c) = chars.next() {
+  for c in chars {
     match c {
       '=' => {
         got_ass = true;
@@ -401,11 +408,9 @@ fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
 
         if c.is_numeric() {
           num.push(c);
-        } else {
-          if !num.is_empty() {
-            /* No digit, but already saw a digit, stop here */
-            break;
-          }
+        } else if !num.is_empty() {
+          /* No digit, but already saw a digit, stop here */
+          break;
         }
       }
     }
