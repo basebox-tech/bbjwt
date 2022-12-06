@@ -64,15 +64,15 @@ pub enum KeyAlgorithm {
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWK {
   /// Key type; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.1)
-  kty: KeyType,
+  pub kty: KeyType,
   /// Algorithm; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.4)
-  alg: Option<KeyAlgorithm>,
+  pub alg: Option<KeyAlgorithm>,
   /// Key id; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.5)
-  kid: Option<String>,
+  pub kid: Option<String>,
   /// RSA modules; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-9.3)
-  n: String,
+  pub n: String,
   /// RSA exponent
-  e: String,
+  pub e: String,
 }
 
 ///
@@ -80,7 +80,7 @@ pub struct JWK {
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWKS {
-  keys: Vec<JWK>
+  pub keys: Vec<JWK>
 }
 
 ///
@@ -89,6 +89,7 @@ pub struct JWKS {
 /// This is basically a thin wrapper around JSON web key sets that adds loading/updating
 /// functionality.
 ///
+#[derive(Debug)]
 pub struct KeyStore {
   /// List of keys in this store.
   keyset: JWKS,
@@ -426,10 +427,37 @@ fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
 mod tests {
 
   use super::*;
-  use std::time::{Duration, SystemTime, UNIX_EPOCH};
+  use std::env;
+  use std::path::Path;
+  use rand::seq::SliceRandom;
+  use std::fs::File;
+  use std::io::Read;
+
 
   /// Seconds since UNIX_EPOCH in the very far future (~1000 years)
   const NEVER_SECONDS: u64 = 33206263475;
+
+  ///
+  /// Utility function that returns the absolute path and file name to a file in the /tests/assets folder.
+  ///
+  /// This is copied from tests::bb_common; unfortunately, I do not know how to import/use code from there.
+  ///
+  /// # Arguments
+  ///
+  /// `asset_name` - path and file name of the file, relative to the "assets" folder.
+  ///
+  /// # Returns
+  ///
+  /// Absolute path to the asset file.
+  ///
+  pub fn path_to_asset_file(asset_name: &str) -> String {
+    let path = Path::new(env::var("CARGO_MANIFEST_DIR")
+      .expect("CARGO_MANIFEST_DIR not set").as_str()
+    ).join(format!("tests/assets/{}", asset_name));
+
+    String::from(path.to_str().unwrap())
+  }
+
 
   #[test]
   ///
@@ -471,6 +499,60 @@ mod tests {
 
   }
 
+  ///
+  /// Test keystore without loading from URL.
+  ///
+  #[tokio::test]
+  async fn test_keystore_local() {
+    /* create empty keystore */
+    let mut ks = KeyStore::new(None).await.expect("Failed to create empty keystore");
+
+    /* load a key from a local JSON file */
+    let key_json_file = path_to_asset_file("pubkey.json");
+    let mut file = File::open(key_json_file).expect("Failed to open pubkey.json");
+    let mut data = String::new();
+    file.read_to_string(&mut data).unwrap();
+
+    /* add key to store */
+    ks.add_key(&data).expect("Failed to add key to store");
+
+    /* get first key */
+    let key1 = ks.key_by_id(None).expect("Failed to get key just added");
+    assert!(key1.kid.unwrap() == "nOo3ZDrODXEK1jKWhXslHR_KXEg");
+
+  }
 
 
+  ///
+  /// Test loading keys from a URL.
+  ///
+  #[tokio::test]
+  async fn test_load_keys() {
+    /* ask Microsoft for the location of their public key store :-) */
+    let url = "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration";
+    let ks_url = KeyStore::idp_certs_url(url).await.expect("Failed to get keyset URL");
+
+    /* Test load keyset from URL */
+    let ks = KeyStore::new(Some(&ks_url)).await.expect("Failed to load keystore");
+
+    /* test for expiration time */
+    assert!(ks.load_time.is_some());
+    assert!(ks.expire_time.is_some());
+    assert!(ks.expire_time.unwrap() > ks.load_time.unwrap());
+
+    println!("KeyStore: {:?}", ks);
+
+    /* Test keys length; should be > 0 */
+    assert!(ks.keys_len() > 0);
+
+    /* get a random key from the keyset */
+    let key = ks.keyset().keys.choose(&mut rand::thread_rng()).expect("Failed to get random key from keyset");
+    /* get its key and try to get it from the store by key id */
+    let kid = key.kid.clone().expect("No kid in key; not an error, but spoils this test...");
+    let k = ks.key_by_id(Some(&kid)).expect("Failed to get key by id");
+
+    /* get key without id; must return the first/something */
+    let k = ks.key_by_id(None).expect("No key returned without kid");
+
+  }
 }
