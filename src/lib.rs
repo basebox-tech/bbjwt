@@ -126,8 +126,6 @@
 #[macro_use]
 extern crate serde_derive;
 
-use std::async_iter;
-
 pub use keystore::KeyStore;
 use errors::{BBResult, BBError};
 
