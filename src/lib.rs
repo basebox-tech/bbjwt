@@ -14,23 +14,61 @@
 //! * Provide an entry point to update the keyset if necessary
 //! * Parse JWTs and validate them using the key(s) in the downloaded keyset.
 //!
-//! Basta (i.e. "that's it").
-//!
-//! **Note:** As stated above, this lib is part of an [OpenID Connect](https://openid.net/connect/)
-//! based authentication system. JWTs created and used by OpenID Connect have slightly different
-//! requirements and rules than other JWTs, and this library assumes OpenID Connect JWTs. More info
-//! about ID Tokens can be found [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken).
+//! And that's it.
 //!
 //! ## Building
 //!
 //! bbjwt uses the openssl crate, so OpenSSL development libraries are required to build bbjwt. See
 //! the [openssl crate's](https://docs.rs/openssl/latest/openssl/) documentation for details.
 //!
-//! ## Why yet another Rust JWT lib?
+//! ## Why yet another Rust JWT validation lib?
 //!
-//! If you ever had tried to use one of the existing libraries to do JWT validation you probably would
-//! not ask this question. In short, the other Rust libraries I have tried are cumbersome to use
-//! and lack documentation.
+//! We tried various other Rust JWT libraries, but none worked for us. Problems were complicated
+//! APIs, lacking documentation and/or functionality. This is our attempt at doing better :-)
+//!
+//! ## Usage
+//!
+//! See the following example:
+//!
+//! ```rust,no_run
+//! use bbjwt::KeyStore;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!   // We need a public key to validate JWTs. These can usually be loaded from a URL provided
+//!   // by the server that issues the JWT; In OpenID Connect, this URL is called
+//!   // "discovery endpoint".
+//!
+//!   // If you are using Keycloak, you can use this convenience function to get the discovery
+//!   // endpoint URL; all you need is the base URL and the realm name:
+//!   let discovery_url = KeyStore::keycloak_discovery_url(
+//!     "https://server.tld", "testing"
+//!   ).unwrap();
+//!
+//!   // If you're not using Keycloak, the URL might be different.
+//!   let discovery_url = "https://idp-host.tld/.well-known/discovery";
+//!
+//!   // Assuming an OpenID Connect server, we call its discovery endpoint to query the keyset URL
+//!   let keyset_url = KeyStore::idp_certs_url(discovery_url).await.unwrap();
+//!
+//!   // Now we can load the keys:
+//!   let keystore = KeyStore::new(Some(&keyset_url)).await.unwrap();
+//!
+//!   // You can also load public keys from memory like this:
+//!   let mut keystore = KeyStore::new(None).await.unwrap();
+//!
+//!   // Read public keys from a buffer; this must be a JWK in JSON syntax; for example
+//!   // https://openid.net/specs/draft-jones-json-web-key-03.html#ExampleJWK
+//!   let key = r#"
+//!   {
+//!     "kty":"RSA",
+//!     "use":"sig",
+//!     ... abbreviated ...",
+//!   }"#;
+//!   // Add the key
+//!   keystore.add_key(key);
+//! }
+//! ```
 //!
 //!
 //! Copyright (c) 2022 basebox GmbH, all rights reserved.
@@ -44,6 +82,8 @@
 
 #[macro_use]
 extern crate serde_derive;
+
+pub use keystore::KeyStore;
 
 
 /* --- mods ------------------------------------------------------------------------------------- */
