@@ -165,7 +165,7 @@ impl KeyStore {
   ///
   /// The cloned keyset or None if something goes wrong.
   ///
-  pub fn keys(&self) -> BBResult<JWKS> {
+  pub fn keyset(&self) -> BBResult<JWKS> {
     if let Ok(keyset) = self.keyset.read() {
       Ok(keyset.clone())
     } else {
@@ -635,15 +635,26 @@ mod tests {
     /* Test keys length; should be > 0 */
     assert!(ks.keys_len() > 0);
 
+    let keyset = ks.keyset().unwrap();
+
     /* get a random key from the keyset */
-    let key = ks.keyset().keys.choose(&mut rand::thread_rng()).expect("Failed to get random key from keyset");
+    let key = keyset
+      .keys
+      .choose(&mut rand::thread_rng())
+      .expect("Failed to get random key from keyset");
+
     /* get its key id and try to get it from the store by key id */
     let kid = key.kid.clone().expect("No kid in key; not an error, but spoils this test...");
     let k = ks.key_by_id(Some(&kid)).expect("Failed to get key by id");
     assert_eq!(k.kid.expect("Missing kid"), kid);
 
     /* get the first key */
-    let k1 = ks.keyset().keys.first().expect("Failed to get first key").clone();
+    let k1 = ks
+      .keyset()
+      .unwrap()
+      .keys
+      .first()
+      .expect("Failed to get first key").clone();
 
     /* get key without id; must return the first/something */
     let k = ks.key_by_id(None).expect("No key returned without kid");
