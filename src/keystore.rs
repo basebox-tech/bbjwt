@@ -19,6 +19,7 @@
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
+use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
 use url::Url;
@@ -91,7 +92,7 @@ pub struct JWKS {
 #[derive(Debug)]
 pub struct KeyStore {
   /// List of keys in this store.
-  keyset: JWKS,
+  keyset: RwLock<JWKS>,
   /// The URL the key set is loaded from.
   url: Option<String>,
   /// The time the keys were last loaded from `url`.
@@ -139,7 +140,7 @@ impl KeyStore {
   ///
   pub async fn new(url: Option<&str>) -> BBResult<Self> {
     let mut ks = KeyStore {
-      keyset: JWKS::new(),
+      keyset: RwLock::new(JWKS::new()),
       url: url.map(String::from),
       load_time: None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
@@ -155,17 +156,32 @@ impl KeyStore {
   }
 
   ///
-  /// Return current keyset.
+  /// Return the keys in the keystore.
   ///
-  pub fn keyset(&self) -> &JWKS {
-    &self.keyset
+  /// This function is cloning all keys, since otherwise the read lock would have to be
+  /// held after this function returns. Thus, use this sparingly :-)
+  ///
+  /// # Returns
+  ///
+  /// The cloned keyset or None if something goes wrong.
+  ///
+  pub fn keys(&self) -> BBResult<JWKS> {
+    if let Ok(keyset) = self.keyset.read() {
+      Ok(keyset.clone())
+    } else {
+      Err(BBError::Other("Keyset lock is poisoned".to_string()))
+    }
   }
 
   ///
   /// Number of keys in keystore.
   ///
   pub fn keys_len(&self) -> usize {
-    self.keyset.keys.len()
+    if let Ok(keyset) = self.keyset.read() {
+      keyset.keys.len()
+    } else {
+      0
+    }
   }
 
   ///
@@ -179,7 +195,10 @@ impl KeyStore {
       .map_err(|e| {
         BBError::Other(format!("Failed to parse key JSON: {:?}", e))
       })?;
-    self.keyset.keys.push(key);
+
+    let mut keyset = self.keyset.write()
+      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    keyset.keys.push(key);
     Ok(())
   }
 
@@ -197,9 +216,12 @@ impl KeyStore {
   ///
   pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<JWK> {
 
+    let keyset = self.keyset.read()
+      .map_err(|e| BBError::Other(format!("Failed to get read lock on keyset: {:?}", e)))?;
+
     let key = if let Some(kid) = kid {
       /* `kid` is Some; return key with specific ID */
-      let key = self.keyset.keys.iter().find(|k: &&JWK| {
+      let key = keyset.keys.iter().find(|k: &&JWK| {
         if let Some(this_kid) = &k.kid {
           this_kid.eq(kid)
         } else {
@@ -210,7 +232,7 @@ impl KeyStore {
 
     } else {
       /* `kid` is None; return first key in set */
-      self.keyset.keys.first().ok_or_else(|| {
+      keyset.keys.first().ok_or_else(|| {
         BBError::Other("No keys in keyset".to_string())
       })?
     };
