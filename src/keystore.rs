@@ -129,30 +129,38 @@ impl Default for JWKS {
 impl KeyStore {
 
   ///
-  /// Create new keyset.
+  /// Create a new, empty keset.
   ///
-  /// If `url` is some, keys will be loaded from this URL; otherwise, the returned
-  /// keystore will have an empty keyset.
+  pub async fn new() -> BBResult<Self> {
+    Ok(KeyStore {
+      keyset: RwLock::new(JWKS::new()),
+      url: None,
+      load_time: None,
+      reload_factor: RELOAD_INTERVAL_FACTOR,
+      reload_time: None,
+    })
+  }
+
+  ///
+  /// Create new keyset and load keys from a URL
   ///
   /// # Arguments
   ///
-  /// `url`: optional URL to load the keys from.
+  /// `url`: URL to load the keys from.
   ///
-  pub async fn new(url: Option<&str>) -> BBResult<Self> {
+  pub async fn new_from_url(url: &str) -> BBResult<Self> {
     let mut ks = KeyStore {
       keyset: RwLock::new(JWKS::new()),
-      url: url.map(String::from),
+      url: Some(url.to_string()),
       load_time: None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
       reload_time: None,
     };
 
     /* load keys from URL if applicable */
-    if url.is_some() {
-      ks.load_keys().await?;
-    }
+    ks.load_keys().await?;
 
-   Ok(ks)
+    Ok(ks)
   }
 
   ///
@@ -169,12 +177,14 @@ impl KeyStore {
     if let Ok(keyset) = self.keyset.read() {
       Ok(keyset.clone())
     } else {
-      Err(BBError::Other("Keyset lock is poisoned".to_string()))
+      Err(BBError::Fatal("Keyset lock is poisoned".to_string()))
     }
   }
 
   ///
   /// Number of keys in keystore.
+  ///
+  /// If the keyset lock is poisoned (should never happen), this function returns 0.
   ///
   pub fn keys_len(&self) -> usize {
     if let Ok(keyset) = self.keyset.read() {
@@ -217,7 +227,7 @@ impl KeyStore {
   pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<JWK> {
 
     let keyset = self.keyset.read()
-      .map_err(|e| BBError::Other(format!("Failed to get read lock on keyset: {:?}", e)))?;
+      .map_err(|_e| BBError::Fatal("The keyset lock is poisoned".to_string()))?;
 
     let key = if let Some(kid) = kid {
       /* `kid` is Some; return key with specific ID */
@@ -583,7 +593,7 @@ mod tests {
   #[tokio::test]
   async fn test_keystore_local() {
     /* create empty keystore */
-    let mut ks = KeyStore::new(None).await.expect("Failed to create empty keystore");
+    let mut ks = KeyStore::new().await.expect("Failed to create empty keystore");
 
     /* load a key from a local JSON file */
     let key_json_file = path_to_asset_file("pubkey.json");
@@ -623,7 +633,7 @@ mod tests {
     let ks_url = KeyStore::idp_certs_url(url).await.expect("Failed to get keyset URL");
 
     /* Test load keyset from URL */
-    let ks = KeyStore::new(Some(&ks_url)).await.expect("Failed to load keystore");
+    let ks = KeyStore::new_from_url(&ks_url).await.expect("Failed to load keystore");
 
     /* test for expiration time */
     assert!(ks.load_time.is_some());

@@ -32,6 +32,10 @@ pub enum BBError {
   /// Some other error.
   Other(String),
 
+  #[error("Fatal error: {0}")]
+  /// A fatal error, we cannot continue.
+  Fatal(String),
+
   #[error("Unknown/unspecified error")]
   /// Something went wrong for an unknown reason; should never be used :-)
   Unknown,
@@ -48,6 +52,7 @@ impl BBError {
     match self {
       Self::NetworkError(..) => "NetworkError".to_string(),
       Self::TokenInvalid(..) => "TokenInvalid".to_string(),
+      Self::Fatal(..) => "Fatal".to_string(),
       Self::Other(..) => "Other".to_string(),
       Self::Unknown => "Unknown".to_string(),
     }
