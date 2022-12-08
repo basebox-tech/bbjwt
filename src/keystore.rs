@@ -146,9 +146,19 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `url`: URL to load the keys from.
+  /// `surl`: URL to load the keys from.
   ///
-  pub async fn new_from_url(url: &str) -> BBResult<Self> {
+  pub async fn new_from_url(surl: &str) -> BBResult<Self> {
+    /* make sure the URL is safe (https) */
+    let url = Url::parse(surl)
+      .map_err(|e| BBError::Other(format!("Invalid keyset URL '{surl}: {:?}", e)))?;
+    let host = url.host_str()
+                  .ok_or_else(||BBError::Other(format!("No host in keyset URL '{surl}")))?;
+    /* if the URL is not local, it must use TLS */
+    if !["localhost", "127.0.0.1"].contains(&host) && url.scheme() != "https" {
+      return Err(BBError::Other("Public keysets must be loaded via https.".to_string()));
+    }
+
     let mut ks = KeyStore {
       keyset: RwLock::new(JWKS::new()),
       url: Some(url.to_string()),
@@ -238,7 +248,7 @@ impl KeyStore {
           false
         }
       });
-      key.ok_or_else(|| BBError::Other(format!("Could not find kid '{}' in keyset.", kid)))?
+      key.ok_or_else(|| BBError::Other(format!("Could not find kid '{kid}' in keyset.")))?
 
     } else {
       /* `kid` is None; return first key in set */
@@ -329,6 +339,7 @@ impl KeyStore {
     let url = self.url
       .clone()
       .ok_or_else(|| BBError::Other("No load URL for keyset provided.".to_string()))?;
+
     let mut response = reqwest::get(&url)
       .await
       .map_err(|e| {
@@ -397,8 +408,7 @@ impl KeyStore {
     let info_json = reqwest::get(idp_discovery_url)
       .await
       .map_err(|e| BBError::NetworkError(
-        format!("Failed to load IdP discovery info JSON from {}: {:?}",
-                idp_discovery_url, e)
+        format!("Failed to load IdP discovery info JSON from {idp_discovery_url}: {:?}", e)
       ))?
       .text()
       .await
@@ -407,7 +417,7 @@ impl KeyStore {
     let info: serde_json::Value = serde_json::from_str(&info_json)
       .map_err(|e| {
         BBError::Other(
-          format!("Invalid JSON from IdP discovery info url '{}': {:?}", idp_discovery_url, e)
+          format!("Invalid JSON from IdP discovery info url '{idp_discovery_url}': {:?}", e)
         )
       })?;
 
@@ -444,7 +454,7 @@ impl KeyStore {
     info_url
       .path_segments_mut()
       .map_err(|_| {
-        BBError::Other(format!("Invalid IdP URL '{}'", host))
+        BBError::Other(format!("Invalid IdP URL '{host}'"))
       })?
       .push("realms")
       .push(realm)
@@ -541,7 +551,7 @@ mod tests {
   pub fn path_to_asset_file(asset_name: &str) -> String {
     let path = Path::new(env::var("CARGO_MANIFEST_DIR")
       .expect("CARGO_MANIFEST_DIR not set").as_str()
-    ).join(format!("tests/assets/{}", asset_name));
+    ).join(format!("tests/assets/{asset_name}"));
 
     String::from(path.to_str().unwrap())
   }
@@ -606,7 +616,7 @@ mod tests {
       /* add keys with patched kid */
       ks.add_key(
         &data.replace("nOo3ZDrODXEK1jKWhXslHR_KXEg",
-                      format!("bbjwt-test-{}", i).as_str()))
+                      format!("bbjwt-test-{i}").as_str()))
         .expect("Failed to add key to keystore");
     }
 
@@ -622,6 +632,14 @@ mod tests {
 
   }
 
+  ///
+  /// Test loading from an insecure URL.
+  ///
+  #[tokio::test]
+  #[should_panic]
+  async fn insecure_keyset_load() {
+    KeyStore::new_from_url("http://login.test.tld/common/openid-co").await.unwrap();
+  }
 
   ///
   /// Test loading keys from a URL.
