@@ -28,6 +28,10 @@ pub enum BBError {
   /// Token has invalid format.
   TokenInvalid(String),
 
+  #[error("Invalid URL: {0}")]
+  /// URL is invalid.
+  URLInvalid(String),
+
   #[error("Error: {0}")]
   /// Some other error.
   Other(String),
@@ -68,6 +72,7 @@ impl BBError {
     match self {
       Self::NetworkError(..) => "NetworkError".to_string(),
       Self::TokenInvalid(..) => "TokenInvalid".to_string(),
+      Self::URLInvalid(..) => "URLInvalid".to_string(),
       Self::Fatal(..) => "Fatal".to_string(),
       Self::Other(..) => "Other".to_string(),
       Self::DecodeError(..) => "DecodeError".to_string(),

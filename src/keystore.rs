@@ -151,12 +151,12 @@ impl KeyStore {
   pub async fn new_from_url(surl: &str) -> BBResult<Self> {
     /* make sure the URL is safe (https) */
     let url = Url::parse(surl)
-      .map_err(|e| BBError::Other(format!("Invalid keyset URL '{surl}: {:?}", e)))?;
+      .map_err(|e| BBError::URLInvalid(format!("Invalid keyset URL '{surl}: {:?}", e)))?;
     let host = url.host_str()
-                  .ok_or_else(||BBError::Other(format!("No host in keyset URL '{surl}")))?;
+                  .ok_or_else(||BBError::URLInvalid(format!("No host in keyset URL '{surl}")))?;
     /* if the URL is not local, it must use TLS */
     if !["localhost", "127.0.0.1"].contains(&host) && url.scheme() != "https" {
-      return Err(BBError::Other("Public keysets must be loaded via https.".to_string()));
+      return Err(BBError::URLInvalid("Public keysets must be loaded via https.".to_string()));
     }
 
     let mut ks = KeyStore {
@@ -636,9 +636,10 @@ mod tests {
   /// Test loading from an insecure URL.
   ///
   #[tokio::test]
-  #[should_panic]
   async fn insecure_keyset_load() {
-    KeyStore::new_from_url("http://login.test.tld/common/openid-co").await.unwrap();
+    /* Loading from non-https URL must be refused/fail */
+    let ret = KeyStore::new_from_url("http://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration").await;
+    assert!(format!("{:?}", ret).contains("https"));
   }
 
   ///
@@ -646,7 +647,7 @@ mod tests {
   ///
   #[tokio::test]
   async fn test_load_keys() {
-    /* ask Microsoft for the location of their public key store :-) */
+    /* ask Seattle for the location of their public key store :-) */
     let url = "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration";
     let ks_url = KeyStore::idp_certs_url(url).await.expect("Failed to get keyset URL");
 
