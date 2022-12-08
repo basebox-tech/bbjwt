@@ -150,9 +150,9 @@ pub mod errors;
 ///
 /// For a list of claims see <https://www.iana.org/assignments/jwt/jwt.xhtml#claims>.
 ///
+/// Note that this enum does not contain a `Signature` variant as the signature is always verified.
+///
 pub enum ValidationStep {
-  /// The signature must be valid.
-  Signature,
   /// "iss" claim must have certain String value.
   Issuer(String),
   /// "aud" claim must have certain String value.
@@ -237,7 +237,6 @@ pub fn default_validations(issuer: &str,
 
   /* Create vector of bare minimum validations */
   let mut validations = vec![
-    ValidationStep::Signature,
     ValidationStep::Issuer(issuer.to_string()),
     ValidationStep::NotExpired,
   ];
@@ -284,6 +283,27 @@ pub async fn validate_jwt(jwt: &str,
 
   /* get public key for signature validation */
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
+
+  /* First, we verify the signature. */
+
+  for step in validation_steps {
+    match step {
+      ValidationStep::Audience(aud) => {
+
+      },
+
+      ValidationStep::HasEmail => {
+
+      }
+      ValidationStep::Issuer(iss) => todo!(),
+      ValidationStep::Nonce(nonce) => todo!(),
+      ValidationStep::NotExpired => todo!(),
+      ValidationStep::HasSubject => todo!(),
+      ValidationStep::HasRoles => todo!(),
+      ValidationStep::HasGroups => todo!(),
+      ValidationStep::HasEntitlements => todo!(),
+    }
+  }
 
   Err(BBError::Other("Not implemented yet :-)".to_string()))
 }

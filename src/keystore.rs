@@ -22,12 +22,17 @@
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
+use openssl::ec::EcGroup;
 use url::Url;
 
 extern crate base64;
 extern crate openssl;
 extern crate serde;
 extern crate serde_json;
+
+use openssl::pkey::{PKey, Public};
+use openssl::nid::Nid;
+
 
 /* --- constants -------------------------------------------------------------------------------- */
 
@@ -40,11 +45,24 @@ pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 /* --- types ------------------------------------------------------------------b------------------ */
 
 ///
+/// Type alias for an OpenSSL backed public key
+///
+pub type PublicKey = PKey<Public>;
+
+///
 /// JWK key type enum
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum KeyType {
+  /// RSA
   RSA,
+  /// Elliptic Curve
+  EC,
+  /// Octet Key Pair
+  OKP,
+  /// Other types are not supported
+  #[serde(other)]
+  Unsupported,
 }
 
 ///
@@ -52,13 +70,31 @@ pub enum KeyType {
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum KeyAlgorithm {
-  RSA256,
+  RS256,
+  RS384,
+  RS512,
+  #[serde(other)]
+  Unsupported,
+}
+
+///
+/// Elliptic Curves
+///
+#[derive(Clone, Debug, Deserialize)]
+pub enum EcCurve {
+  #[serde(rename = "P-256")]
+  P256,
+  #[serde(rename = "P-384")]
+  P384,
+  #[serde(rename = "P-521")]
+  P521
 }
 
 ///
 /// JSON web key
 ///
-/// For a description of the members, see [RFC7517](https://www.rfc-editor.org/rfc/rfc7517).
+/// This lib supports EC and RSA keys as required by the OpenID Connect spec, see
+/// <https://openid.net/specs/draft-jones-json-web-key-03.html#anchor6>.
 ///
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
@@ -69,10 +105,16 @@ pub struct JWK {
   pub alg: Option<KeyAlgorithm>,
   /// Key id; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.5)
   pub kid: Option<String>,
-  /// RSA modules; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-9.3)
-  pub n: String,
+  /// RSA modulus; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-9.3)
+  pub n: Option<String>,
   /// RSA exponent
-  pub e: String,
+  pub e: Option<String>,
+  /// EC curve, only for kty="EC"
+  pub crv: Option<EcCurve>,
+  /// EC x coordinate, only for kty="EC"
+  pub x: Option<String>,
+  /// EC y coordinate, only for kty="EC"
+  pub y: Option<String>
 }
 
 ///
@@ -122,6 +164,44 @@ impl Default for JWKS {
   fn default() -> Self {
     Self::new()
   }
+}
+
+
+///
+/// Create an OpenSSL-backed public key from a JWK.
+///
+/// # Arguments
+///
+/// `jwk` - the JWK to convert.
+///
+/// # Returns
+///
+/// A PublicKey instance.
+///
+fn pubkey_from_jwk(jwk: &JWK) -> BBResult<PublicKey> {
+
+  match jwk.kty {
+
+    KeyType::EC => {
+      /* get the curve name */
+      let nid = match jwk.crv {
+        Some(EcCurve::P256) => Some(Nid::X9_62_PRIME256V1),
+        Some(EcCurve::P384) => Some(Nid::SECP384R1),
+        Some(EcCurve::P521) => Some(Nid::SECP521R1),
+        _ => None
+      };
+      if nid.is_none() {
+        return Err(BBError::Other("Missing or unsupported 'crv' field for EC key".to_string()));
+      }
+      let nid = nid.unwrap();
+      let group = EcGroup::from_curve_name(nid)
+        .map_err(|e|BBError::Other("Cannot create EcGroup from nid {:?}", nid))?;
+
+
+
+    }
+  }
+
 }
 
 
