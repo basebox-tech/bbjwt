@@ -24,8 +24,8 @@ pub enum BBError {
   /// Some network communication failed.
   NetworkError(String),
 
-  #[error("Token validation failed: {0}")]
-  /// Token validation failed.
+  #[error("Token could not be parsed: {0}")]
+  /// Token has invalid format.
   TokenInvalid(String),
 
   #[error("Error: {0}")]
@@ -35,6 +35,22 @@ pub enum BBError {
   #[error("Fatal error: {0}")]
   /// A fatal error, we cannot continue.
   Fatal(String),
+
+  #[error("JSON error: {0}")]
+  /// JSON related error.
+  JSONError(String),
+
+  #[error("Decoding error: {0}")]
+  /// Decoding (base64) failed.
+  DecodeError(String),
+
+  #[error("Invalid claim value: {0}")]
+  /// A claim did not validate/contained the wrong value.
+  ClaimInvalid(String),
+
+  #[error("Invalid signature")]
+  /// The signature could not be verified.
+  SignatureInvalid(),
 
   #[error("Unknown/unspecified error")]
   /// Something went wrong for an unknown reason; should never be used :-)
@@ -54,6 +70,10 @@ impl BBError {
       Self::TokenInvalid(..) => "TokenInvalid".to_string(),
       Self::Fatal(..) => "Fatal".to_string(),
       Self::Other(..) => "Other".to_string(),
+      Self::DecodeError(..) => "DecodeError".to_string(),
+      Self::JSONError(..) => "JSONError".to_string(),
+      Self::ClaimInvalid(..) => "ClaimInvalid".to_string(),
+      Self::SignatureInvalid(..) => "SignatureInvalid".to_string(),
       Self::Unknown => "Unknown".to_string(),
     }
   }

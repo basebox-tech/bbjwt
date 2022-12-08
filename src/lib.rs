@@ -129,6 +129,10 @@ extern crate serde_derive;
 pub use keystore::KeyStore;
 use errors::{BBResult, BBError};
 
+use std::collections::HashMap;
+use base64;
+use serde::de::{DeserializeOwned};
+
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -174,11 +178,36 @@ pub enum ValidationStep {
 ///
 /// This is created and returned to the caller upon successful validation.
 ///
-pub struct TokenClaims {
-
+pub struct JWTClaims {
+  /// JOSE header fields of the JWTs, see [RFC7519](https://www.rfc-editor.org/rfc/rfc7519#section-5)
+  headers: HashMap<String, String>,
+  /// Claims (fields) found in the JWT. What fields are present depends on the purpose of
+  /// the JWT. For OpenID Connect ID tokens see
+  /// [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken)
+  claims: HashMap<String, String>
 }
 
 
+///
+/// JOSE header struct with all fields relevant to us.
+///
+/// This is the first of 3 parts of a JWT, the others being claims and signature.
+/// See <https://www.rfc-editor.org/rfc/rfc7515#section-4>.
+///
+/// **Important**: For now, bbjwt ignores the `jku` and `jwk` parameters since in my opinion,
+/// signing a data structure and including the public key to verify it in the same data structure
+/// is completely pointless.
+/// Instead, the public keys have to come from a trusted, different source. The trust comes from
+/// verifying the `iss` field of the header.
+/// I have no idea if `jku` and/or `jwk` fields are actually being used...
+///
+#[derive(Deserialize)]
+struct JOSEHeader {
+  /// Algorithm
+  alg: String,
+  /// ID of the public key used to sign this JWT
+  kid: Option<String>,
+}
 
 /* --- start of code ---------------------------------------------------------------------------- */
 
@@ -202,11 +231,10 @@ pub struct TokenClaims {
 ///
 /// A vector of ValidationStep variants that can be passed into the [`validate_jwt`] function.
 ///
-pub fn default_validations(
-  issuer: &str,
-  audience: Option<&str>,
-  nonce: Option<&str>
-) -> Vec<ValidationStep> {
+pub fn default_validations(issuer: &str,
+                           audience: Option<&str>,
+                           nonce: Option<&str>) -> Vec<ValidationStep> {
+
   /* Create vector of bare minimum validations */
   let mut validations = vec![
     ValidationStep::Signature,
@@ -227,6 +255,9 @@ pub fn default_validations(
 ///
 /// Validate a JWT.
 ///
+/// This function decodes the token string (base64), decrypts it (if applicable) and
+/// then validates it.
+///
 /// # Arguments
 ///
 /// * `jwt` - Base64 encoded JWT to validate
@@ -237,10 +268,46 @@ pub fn default_validations(
 ///
 /// All claims found in the JWT on success.
 ///
-pub async fn validate_jwt(
-  jwt: &str,
-  validation_steps: &Vec<ValidationStep>,
-  keystore: &KeyStore) -> BBResult<TokenClaims> {
+pub async fn validate_jwt(jwt: &str,
+                          validation_steps: &Vec<ValidationStep>,
+                          keystore: &KeyStore) -> BBResult<JWTClaims> {
+
+  /* A JWT is a Base64 encoded string with 3 parts separated by dots:
+   * HEADER.CLAIMS.SIGNATURE */
+  let parts: Vec<&str> = jwt.splitn(3, '.').collect();
+  if parts.len() != 3 {
+    return Err(BBError::TokenInvalid("Could not split token in 3 parts.".to_string()));
+  }
+
+  /* Get the JOSE header */
+  let kid_hdr: JOSEHeader = deserialize_b64(parts[0])?;
+
+  /* get public key for signature validation */
+  let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
 
   Err(BBError::Other("Not implemented yet :-)".to_string()))
+}
+
+///
+/// Return config instance for base64 decoding of JWTs.
+///
+fn bbjwt_b64_config() -> base64::Config {
+  base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
+}
+
+
+///
+/// Base64 decode a string and deserialize it using serde_json.
+///
+/// # Arguments
+///
+/// `b64` - base64 encoded JSON string; a JOSE header maybe.
+///
+fn deserialize_b64<T: DeserializeOwned>(b64: &str) -> BBResult<T> {
+  /* decode base64 */
+  let json = base64::decode_config(b64, bbjwt_b64_config())
+    .map_err(|e| BBError::DecodeError(format!("Failed to decode JWT: {:?}", e)))?;
+  /* deserialize JSON string */
+  serde_json::from_slice(&json)
+    .map_err(|e| BBError::JSONError(format!("{:?}", e)))
 }
