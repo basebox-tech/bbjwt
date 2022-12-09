@@ -62,7 +62,8 @@
 //!   // If you're not using Keycloak, the URL might be different.
 //!   let discovery_url = "https://idp-host.tld/.well-known/discovery";
 //!
-//!   // Assuming an OpenID Connect server, we call its discovery endpoint to query the keyset URL
+//!   // Call IdP's discovery endpoint to query the keyset URL; this is a common feature on
+//!   // OpenID Connect servers.
 //!   let keyset_url = KeyStore::idp_certs_url(discovery_url).await.unwrap();
 //!
 //!   // Now we can load the keys into a new KeyStore:
@@ -84,14 +85,14 @@
 //!
 //!   // Read public keys from a buffer; this must be a JWK in JSON syntax; for example
 //!   // https://openid.net/specs/draft-jones-json-web-key-03.html#ExampleJWK
-//!   let key = r#"
+//!   let json_key = r#"
 //!   {
 //!     "kty":"RSA",
 //!     "use":"sig",
-//!     ... abbreviated ...",
+//!     ... abbreviated ...,
 //!   }"#;
 //!   // Add the key
-//!   keystore.add_key(key);
+//!   keystore.add_key(json_key);
 //!
 //!   // You can add more keys; in this case, the keys should have an ID and the JWT to be
 //!   // validated should have a "kid" claim. Otherwise, bbjwt uses the first key in the set.
