@@ -29,11 +29,11 @@ use url::Url;
 extern crate openssl;
 extern crate serde;
 extern crate serde_json;
+extern crate base64;
 
 use openssl::pkey::{PKey, Public};
 use openssl::nid::Nid;
 use openssl::rsa::Rsa;
-use openssl::base64;
 use openssl::pkey::Id;
 
 
@@ -195,8 +195,16 @@ impl EcCurve {
       _ => None
     }
   }
-
 }
+
+
+///
+/// Return config instance for base64 decoding of JWTs.
+///
+pub fn base64_config() -> base64::Config {
+  base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
+}
+
 
 ///
 /// Create a BigNum from a base64 encoded string.
@@ -207,8 +215,8 @@ impl EcCurve {
 /// `error_context` - a string to include in error messages
 ///
 fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
-  let bytes = base64::decode_block(b64).map_err(
-    |e| BBError::DecodeError(format!("{error_context}: '{}'", e))
+  let bytes = base64::decode_config(b64, base64_config()).map_err(
+    |e| BBError::DecodeError(format!("{error_context}: '{:?}'", e))
   )?;
 
   BigNum::from_slice(&bytes).map_err(
@@ -291,7 +299,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
       if jwk.x.is_none() {
         return Err(BBError::JWKInvalid(format!("Missing x for Ed/OKP key '{kid}'")));
       }
-      let bytes = base64::decode_block(&jwk.x.as_ref().unwrap())
+      let bytes = base64::decode_config(&jwk.x.as_ref().unwrap(), base64_config())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
       let curve_id = match jwk.crv {
         Some(EcCurve::Ed25519) => Id::ED25519,
@@ -761,7 +769,6 @@ mod tests {
     String::from(path.to_str().unwrap())
   }
 
-
   #[test]
   ///
   /// Test for `keycloak_discovery_url`
@@ -873,7 +880,6 @@ mod tests {
 
     /* get a random key from the keyset */
     let key = keyset
-      .keys
       .choose(&mut rand::thread_rng())
       .expect("Failed to get random key from keyset");
 
@@ -886,7 +892,6 @@ mod tests {
     let k1 = ks
       .keyset()
       .unwrap()
-      .keys
       .first()
       .expect("Failed to get first key").clone();
 

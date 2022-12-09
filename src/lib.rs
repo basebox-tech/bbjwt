@@ -132,7 +132,8 @@ use errors::{BBResult, BBError};
 use std::collections::HashMap;
 
 use serde::de::{DeserializeOwned};
-use openssl::base64;
+use base64;
+use keystore::base64_config;
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -317,7 +318,7 @@ pub async fn validate_jwt(jwt: &str,
 ///
 fn deserialize_b64<T: DeserializeOwned>(b64: &str) -> BBResult<T> {
   /* decode base64 */
-  let json = base64::decode_block(b64)
+  let json = base64::decode_config(b64, base64_config())
     .map_err(|e| BBError::DecodeError(format!("Failed to decode JWT: {:?}", e)))?;
   /* deserialize JSON string */
   serde_json::from_slice(&json)
