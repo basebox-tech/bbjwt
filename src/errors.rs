@@ -32,10 +32,6 @@ pub enum BBError {
   /// URL is invalid.
   URLInvalid(String),
 
-  #[error("Error: {0}")]
-  /// Some other error.
-  Other(String),
-
   #[error("Fatal error: {0}")]
   /// A fatal error, we cannot continue.
   Fatal(String),
@@ -43,6 +39,10 @@ pub enum BBError {
   #[error("JSON error: {0}")]
   /// JSON related error.
   JSONError(String),
+
+  #[error("JWK data is invalid: {0}")]
+  /// JWK contains invalid data
+  JWKInvalid(String),
 
   #[error("Decoding error: {0}")]
   /// Decoding (base64) failed.
@@ -55,6 +55,10 @@ pub enum BBError {
   #[error("Invalid signature")]
   /// The signature could not be verified.
   SignatureInvalid(),
+
+  #[error("Error: {0}")]
+  /// Some other error.
+  Other(String),
 
   #[error("Unknown/unspecified error")]
   /// Something went wrong for an unknown reason; should never be used :-)
@@ -73,12 +77,13 @@ impl BBError {
       Self::NetworkError(..) => "NetworkError".to_string(),
       Self::TokenInvalid(..) => "TokenInvalid".to_string(),
       Self::URLInvalid(..) => "URLInvalid".to_string(),
+      Self::JWKInvalid(..) => "JWKInvalid".to_string(),
       Self::Fatal(..) => "Fatal".to_string(),
-      Self::Other(..) => "Other".to_string(),
       Self::DecodeError(..) => "DecodeError".to_string(),
       Self::JSONError(..) => "JSONError".to_string(),
       Self::ClaimInvalid(..) => "ClaimInvalid".to_string(),
       Self::SignatureInvalid(..) => "SignatureInvalid".to_string(),
+      Self::Other(..) => "Other".to_string(),
       Self::Unknown => "Unknown".to_string(),
     }
   }

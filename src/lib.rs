@@ -130,9 +130,9 @@ pub use keystore::KeyStore;
 use errors::{BBResult, BBError};
 
 use std::collections::HashMap;
-use base64;
-use serde::de::{DeserializeOwned};
 
+use serde::de::{DeserializeOwned};
+use openssl::base64;
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -309,14 +309,6 @@ pub async fn validate_jwt(jwt: &str,
 }
 
 ///
-/// Return config instance for base64 decoding of JWTs.
-///
-fn bbjwt_b64_config() -> base64::Config {
-  base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
-}
-
-
-///
 /// Base64 decode a string and deserialize it using serde_json.
 ///
 /// # Arguments
@@ -325,7 +317,7 @@ fn bbjwt_b64_config() -> base64::Config {
 ///
 fn deserialize_b64<T: DeserializeOwned>(b64: &str) -> BBResult<T> {
   /* decode base64 */
-  let json = base64::decode_config(b64, bbjwt_b64_config())
+  let json = base64::decode_block(b64)
     .map_err(|e| BBError::DecodeError(format!("Failed to decode JWT: {:?}", e)))?;
   /* deserialize JSON string */
   serde_json::from_slice(&json)

@@ -22,16 +22,19 @@
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
-use openssl::ec::EcGroup;
+use openssl::bn::BigNum;
+use openssl::ec::{EcGroup, EcKey};
 use url::Url;
 
-extern crate base64;
 extern crate openssl;
 extern crate serde;
 extern crate serde_json;
 
 use openssl::pkey::{PKey, Public};
 use openssl::nid::Nid;
+use openssl::rsa::Rsa;
+use openssl::base64;
+use openssl::pkey::Id;
 
 
 /* --- constants -------------------------------------------------------------------------------- */
@@ -42,12 +45,20 @@ use openssl::nid::Nid;
 pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 
 
-/* --- types ------------------------------------------------------------------b------------------ */
+/* --- types ------------------------------------------------------------------------------------ */
 
 ///
-/// Type alias for an OpenSSL backed public key
+/// A key as we store it in the key store.
 ///
-pub type PublicKey = PKey<Public>;
+/// This is basically an OpenSSL PKey<Public> with required fields from the original JWK.
+///
+#[derive(Debug, Clone)]
+pub struct BBKey {
+  /// OpenSSL public key (EC, RSA, or Ed for now)
+  key: PKey<Public>,
+  /// Optional key ID from the JWK
+  kid: Option<String>,
+}
 
 ///
 /// JWK key type enum
@@ -74,11 +85,11 @@ pub enum KeyAlgorithm {
   RS384,
   RS512,
   #[serde(other)]
-  Unsupported,
+  Other,
 }
 
 ///
-/// Elliptic Curves
+/// Elliptic Curves for EC and Ed/OKP keys
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum EcCurve {
@@ -87,7 +98,9 @@ pub enum EcCurve {
   #[serde(rename = "P-384")]
   P384,
   #[serde(rename = "P-521")]
-  P521
+  P521,
+  Ed25519,
+  Ed448,
 }
 
 ///
@@ -133,8 +146,8 @@ pub struct JWKS {
 ///
 #[derive(Debug)]
 pub struct KeyStore {
-  /// List of keys in this store.
-  keyset: RwLock<JWKS>,
+  /// List of keys in this store
+  keyset: RwLock<Vec<BBKey>>,
   /// The URL the key set is loaded from.
   url: Option<String>,
   /// The time the keys were last loaded from `url`.
@@ -167,6 +180,44 @@ impl Default for JWKS {
 }
 
 
+impl EcCurve {
+
+  ///
+  /// Map elliptic curve variant to its matching OpenSSL NID.
+  ///
+  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
+  ///
+  pub fn nid(&self) -> Option<Nid> {
+    match *self {
+      EcCurve::P256 => Some(Nid::X9_62_PRIME256V1),
+      EcCurve::P384 => Some(Nid::SECP384R1),
+      EcCurve::P521 => Some(Nid::SECP521R1),
+      _ => None
+    }
+  }
+
+}
+
+///
+/// Create a BigNum from a base64 encoded string.
+///
+/// # Arguments
+///
+/// `b64` - base64 encoded binary value; if None, an error is returned
+/// `error_context` - a string to include in error messages
+///
+fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
+  let bytes = base64::decode_block(b64).map_err(
+    |e| BBError::DecodeError(format!("{error_context}: '{}'", e))
+  )?;
+
+  BigNum::from_slice(&bytes).map_err(
+    |e| BBError::DecodeError(
+      format!("Failed to create number from b64 string ({error_context}): {}", e)
+    )
+  )
+}
+
 ///
 /// Create an OpenSSL-backed public key from a JWK.
 ///
@@ -178,29 +229,92 @@ impl Default for JWKS {
 ///
 /// A PublicKey instance.
 ///
-fn pubkey_from_jwk(jwk: &JWK) -> BBResult<PublicKey> {
+fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
 
-  match jwk.kty {
+  let kid = if jwk.kid.is_some() {
+    jwk.kid.as_ref().unwrap()
+    } else {
+    "<no_kid>"
+  };
+
+  let key = match jwk.kty {
 
     KeyType::EC => {
-      /* get the curve name */
-      let nid = match jwk.crv {
-        Some(EcCurve::P256) => Some(Nid::X9_62_PRIME256V1),
-        Some(EcCurve::P384) => Some(Nid::SECP384R1),
-        Some(EcCurve::P521) => Some(Nid::SECP521R1),
-        _ => None
-      };
-      if nid.is_none() {
-        return Err(BBError::Other("Missing or unsupported 'crv' field for EC key".to_string()));
-      }
-      let nid = nid.unwrap();
+      /* get the curve name/id */
+      let nid = if jwk.crv.is_some() {
+        jwk.crv.as_ref().unwrap().nid()
+      } else {
+        None
+      }.ok_or_else(
+        || BBError::JWKInvalid(format!("Missing or unsupported 'crv' field for EC key '{kid}'"))
+      )?;
       let group = EcGroup::from_curve_name(nid)
-        .map_err(|e|BBError::Other("Cannot create EcGroup from nid {:?}", nid))?;
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Cannot create EcGroup from nid {:?} for key {kid}: {}", nid, e)))?;
 
+      /* get point coordinates */
+      if jwk.x.is_none() || jwk.y.is_none() {
+        return Err(BBError::JWKInvalid(format!("Missing x or y for EC key '{kid}'")));
+      }
+      let x = bignum_from_base64(jwk.x.as_ref().unwrap(), "EC x")?;
+      let y = bignum_from_base64(jwk.y.as_ref().unwrap(), "EC y")?;
 
+      let ec_key = EcKey::from_public_key_affine_coordinates(&group, &x, &y)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create EcKey for {kid}': {}", e))
+        )?;
+      PKey::from_ec_key(ec_key)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create PKey/EC for {kid}': {}", e))
+        )?
+    },
 
+    KeyType::RSA => {
+      if jwk.n.is_none() || jwk.e.is_none() {
+        return Err(BBError::JWKInvalid(format!("Missing n or e for RSA key '{kid}'")));
+      }
+      let n = bignum_from_base64(jwk.n.as_ref().unwrap(), "RSA n")?;
+      let e = bignum_from_base64(&jwk.e.as_ref().unwrap(), "RSA e")?;
+      let rsa_key = Rsa::from_public_components(n, e)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create RSA key from {kid}: {}", e))
+        )?;
+      PKey::from_rsa(rsa_key)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from {kid}: {}", e))
+        )?
+    },
+
+    KeyType::OKP => {
+      /* OKP is Ed25519 or Ed448. Names, names, lots of names.
+       * This public key type uses only the x coordinate on the elliptic curve */
+      if jwk.x.is_none() {
+        return Err(BBError::JWKInvalid(format!("Missing x for Ed/OKP key '{kid}'")));
+      }
+      let bytes = base64::decode_block(&jwk.x.as_ref().unwrap())
+        .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
+      let curve_id = match jwk.crv {
+        Some(EcCurve::Ed25519) => Id::ED25519,
+        Some(EcCurve::Ed448) => Id::ED448,
+        None => Id::ED25519,
+        _ => {
+          return Err(BBError::JWKInvalid(format!("Invalid curve for Ed/OKP key {kid}")));
+        }
+      };
+
+      PKey::public_key_from_raw_bytes(&bytes, curve_id)
+        .map_err(|e| BBError::JWKInvalid(format!("Failed to read Ed key for {kid}: {}", e)))?
     }
-  }
+
+    _ => {
+      return Err(BBError::JWKInvalid(format!("Unsupported keytype for {kid}")));
+    }
+  };
+
+  Ok(BBKey {
+    kid: jwk.kid.clone().map(|kid| kid.to_string()),
+    key
+  })
 
 }
 
@@ -209,11 +323,11 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<PublicKey> {
 impl KeyStore {
 
   ///
-  /// Create a new, empty keset.
+  /// Create a new, empty keyset.
   ///
   pub async fn new() -> BBResult<Self> {
     Ok(KeyStore {
-      keyset: RwLock::new(JWKS::new()),
+      keyset: RwLock::new(Vec::new()),
       url: None,
       load_time: None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
@@ -240,7 +354,7 @@ impl KeyStore {
     }
 
     let mut ks = KeyStore {
-      keyset: RwLock::new(JWKS::new()),
+      keyset: RwLock::new(Vec::new()),
       url: Some(url.to_string()),
       load_time: None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
@@ -263,7 +377,7 @@ impl KeyStore {
   ///
   /// The cloned keyset or None if something goes wrong.
   ///
-  pub fn keyset(&self) -> BBResult<JWKS> {
+  pub fn keyset(&self) -> BBResult<Vec<BBKey>> {
     if let Ok(keyset) = self.keyset.read() {
       Ok(keyset.clone())
     } else {
@@ -278,7 +392,7 @@ impl KeyStore {
   ///
   pub fn keys_len(&self) -> usize {
     if let Ok(keyset) = self.keyset.read() {
-      keyset.keys.len()
+      keyset.len()
     } else {
       0
     }
@@ -291,14 +405,14 @@ impl KeyStore {
   /// `key_json` - JSON string containing a [`JWK`].
   ///
   pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
-    let key = serde_json::from_str(key_json)
+    let key: JWK = serde_json::from_str(key_json)
       .map_err(|e| {
         BBError::Other(format!("Failed to parse key JSON: {:?}", e))
       })?;
 
     let mut keyset = self.keyset.write()
       .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
-    keyset.keys.push(key);
+    keyset.push(pubkey_from_jwk(&key)?);
     Ok(())
   }
 
@@ -314,14 +428,14 @@ impl KeyStore {
   /// # Arguments
   /// `kid` - the ID of the key. If None, the first key is returned.
   ///
-  pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<JWK> {
+  pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<BBKey> {
 
     let keyset = self.keyset.read()
       .map_err(|_e| BBError::Fatal("The keyset lock is poisoned".to_string()))?;
 
     let key = if let Some(kid) = kid {
       /* `kid` is Some; return key with specific ID */
-      let key = keyset.keys.iter().find(|k: &&JWK| {
+      let key = keyset.iter().find(|k: &&BBKey| {
         if let Some(this_kid) = &k.kid {
           this_kid.eq(kid)
         } else {
@@ -332,7 +446,7 @@ impl KeyStore {
 
     } else {
       /* `kid` is None; return first key in set */
-      keyset.keys.first().ok_or_else(|| {
+      keyset.first().ok_or_else(|| {
         BBError::Other("No keys in keyset".to_string())
       })?
     };
@@ -436,8 +550,19 @@ impl KeyStore {
       .map_err(|e| BBError::NetworkError(format!("Failed to load public key set: {:?}", e)))?;
 
     /* deserialize JSON into our JWKS struct */
-    self.keyset = serde_json::from_str(&json)
+    let keyset: JWKS = serde_json::from_str(&json)
       .map_err(|e| BBError::Other(format!("Failed to parse IdP public key set: {:?}", e)))?;
+
+    let mut keys = self.keyset.write().map_err(
+      |e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e))
+    )?;
+
+    keys.clear();
+
+    /* convert all keys to OpenSSL types */
+    for key in keyset.keys {
+      keys.push(pubkey_from_jwk(&key)?);
+    }
 
     /* update load time and expiration time */
     let load_time = SystemTime::now();
