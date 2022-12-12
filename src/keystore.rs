@@ -22,8 +22,6 @@
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
-use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
 use url::Url;
 
 extern crate openssl;
@@ -31,10 +29,14 @@ extern crate serde;
 extern crate serde_json;
 extern crate base64;
 
+use openssl::bn::BigNum;
+use openssl::ec::{EcGroup, EcKey};
+use openssl::sign::Verifier;
 use openssl::pkey::{PKey, Public};
 use openssl::nid::Nid;
 use openssl::rsa::Rsa;
 use openssl::pkey::Id;
+use openssl::hash::MessageDigest;
 
 
 /* --- constants -------------------------------------------------------------------------------- */
@@ -54,10 +56,16 @@ pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 ///
 #[derive(Debug, Clone)]
 pub struct BBKey {
-  /// OpenSSL public key (EC, RSA, or Ed for now)
+  /// OpenSSL public key
   key: PKey<Public>,
   /// Optional key ID from the JWK
   kid: Option<String>,
+  /// Key type
+  kty: KeyType,
+  /// Curve for elliptic curve algorithms
+  crv: Option<EcCurve>,
+  /// Hash algorithm
+  alg: Option<KeyAlgorithm>
 }
 
 ///
@@ -198,6 +206,79 @@ impl EcCurve {
 }
 
 
+impl BBKey {
+
+  ///
+  /// Return verbose key id for logging etc.
+  ///
+  fn key_id(&self) -> String {
+    self.kid.clone().unwrap_or_else(||"<first>".to_string())
+  }
+
+  ///
+  /// Return an OpenSSL verifier using this key.
+  ///
+  pub fn verifier(&self) -> BBResult<Verifier> {
+
+    let verifier = match self.kty {
+
+      KeyType::RSA => {
+        /* Get message digest for the algorithm used */
+        let message_digest = match self.alg.clone().unwrap_or(KeyAlgorithm::RS256) {
+          KeyAlgorithm::RS256 => MessageDigest::sha256(),
+          KeyAlgorithm::RS384 => MessageDigest::sha384(),
+          KeyAlgorithm::RS512 => MessageDigest::sha512(),
+          KeyAlgorithm::Other => return Err(
+            BBError::Other(format!("Unsupported key algorithm for key '{}'.", self.key_id()))
+          ),
+        };
+        /* create verifier */
+        Verifier::new(message_digest, &self.key).map_err(
+          |e| BBError::Other(
+            format!("Failed to create verifier for RSA key '{}': {:?}", self.key_id(), e)
+          )
+        )?
+      }
+
+      KeyType::EC => {
+        let curve = self.crv.clone().unwrap_or(EcCurve::P256);
+        let nid = curve.nid().ok_or_else(|| BBError::Other("Unknown curve".to_string()))?;
+        let message_digest = MessageDigest::from_nid(nid)
+          .ok_or_else(||BBError::Other(
+            format!("Failed to get curve NID for key '{}'", self.key_id()))
+          )?;
+        /* create verifier */
+        Verifier::new(message_digest, &self.key).map_err(
+          |e| BBError::Other(
+            format!("Failed to create verifier for EC key '{}': {:?}", self.key_id(), e)
+          )
+        )?
+      },
+
+      KeyType::OKP => {
+        /* Ed does not use a message digest */
+        Verifier::new_without_digest(&self.key).map_err(
+          |e| BBError::Other(
+            format!("Failed to create verifier for Ed key '{}': {:?}", self.key_id(), e)
+          )
+        )?
+      },
+
+      KeyType::Unsupported => {
+        return Err(BBError::Other(
+          format!("Unsupported key type for key '{}'", self.key_id()))
+        );
+      },
+
+    };
+
+    Ok(verifier)
+
+  }
+
+}
+
+
 ///
 /// Return config instance for base64 decoding of JWTs.
 ///
@@ -228,6 +309,8 @@ fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
 
 ///
 /// Create an OpenSSL-backed public key from a JWK.
+///
+/// This basically converts a JWK to a openssl::Pkey<Public>, wrapper in a [`BBKey`] struct.
 ///
 /// # Arguments
 ///
@@ -282,7 +365,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         return Err(BBError::JWKInvalid(format!("Missing n or e for RSA key '{kid}'")));
       }
       let n = bignum_from_base64(jwk.n.as_ref().unwrap(), "RSA n")?;
-      let e = bignum_from_base64(&jwk.e.as_ref().unwrap(), "RSA e")?;
+      let e = bignum_from_base64(jwk.e.as_ref().unwrap(), "RSA e")?;
       let rsa_key = Rsa::from_public_components(n, e)
         .map_err(
           |e| BBError::JWKInvalid(format!("Failed to create RSA key from {kid}: {}", e))
@@ -299,7 +382,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
       if jwk.x.is_none() {
         return Err(BBError::JWKInvalid(format!("Missing x for Ed/OKP key '{kid}'")));
       }
-      let bytes = base64::decode_config(&jwk.x.as_ref().unwrap(), base64_config())
+      let bytes = base64::decode_config(jwk.x.as_ref().unwrap(), base64_config())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
       let curve_id = match jwk.crv {
         Some(EcCurve::Ed25519) => Id::ED25519,
@@ -320,8 +403,11 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
   };
 
   Ok(BBKey {
-    kid: jwk.kid.clone().map(|kid| kid.to_string()),
-    key
+    kid: jwk.kid.clone(),
+    key,
+    kty: jwk.kty.clone(),
+    crv: jwk.crv.clone(),
+    alg: jwk.alg.clone(),
   })
 
 }

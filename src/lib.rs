@@ -133,8 +133,9 @@ use errors::{BBResult, BBError};
 use std::collections::HashMap;
 
 use serde::de::{DeserializeOwned};
-use base64;
 use keystore::base64_config;
+
+use openssl::sign::Verifier;
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -243,11 +244,11 @@ pub fn default_validations(issuer: &str,
     ValidationStep::NotExpired,
   ];
 
-  if audience.is_some() {
-    validations.push(ValidationStep::Audience(audience.unwrap().to_string()));
+  if let Some(audience) = audience {
+    validations.push(ValidationStep::Audience(audience.to_string()));
   }
-  if nonce.is_some() {
-    validations.push(ValidationStep::Nonce(nonce.unwrap().to_string()));
+  if let Some(nonce) = nonce {
+    validations.push(ValidationStep::Nonce(nonce.to_string()));
   }
 
   validations
@@ -287,6 +288,8 @@ pub async fn validate_jwt(jwt: &str,
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
 
   /* First, we verify the signature. */
+  let mut verifier = pubkey.verifier()?;
+  check_jwt_signature(&parts, &mut verifier)?;
 
   for step in validation_steps {
     match step {
@@ -308,6 +311,36 @@ pub async fn validate_jwt(jwt: &str,
   }
 
   Err(BBError::Other("Not implemented yet :-)".to_string()))
+}
+
+///
+/// Check if a JWT's signature is correct.
+///
+/// # Arguments
+///
+/// jwt_parts: JWT split by '.'; must be a vector of 3 strings
+/// verifier: The OpenSSL verifier to use
+///
+fn check_jwt_signature(jwt_parts: &[&str], verifier: &mut Verifier) -> BBResult<()> {
+  /* first 2 parts are JWT data */
+  let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
+  /* signature is the 3rd part */
+  let sig = base64::decode_config(jwt_parts[2], base64_config())
+    .map_err(|e|BBError::DecodeError(format!("{:?}", e))
+  )?;
+
+  /* verify signature */
+  verifier.update(jwt_data.as_bytes()).map_err(
+    |e| BBError::DecodeError(format!("{:?}", e))
+  )?;
+
+  match verifier.verify(&sig)
+    .map_err(|e|BBError::Other(format!("Failed to check signature: {:?}", e))
+  )? {
+    true => Ok(()),
+    false => Err(BBError::SignatureInvalid())
+  }
+
 }
 
 ///
