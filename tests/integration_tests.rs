@@ -53,6 +53,19 @@ async fn test_rsa256() {
   .await
   .expect("Valid JWT did not validate");
 
+  /* wrong issuer, must fail */
+  let ret = validate_jwt(
+    &jwt,
+    &default_validations("https://kcdev.basebox.health:8443/realms/WRONG", None, None),
+    &ks
+  )
+  .await;
+  if let Err(err) = ret {
+    assert!(err.to_string().contains("iss"));
+  } else {
+    assert!(false, "Wrong issuer validated ok");
+  }
+
   /* verify expired token, must fail */
   let jwt = load_asset("id_token_rsa256_expired.txt");
   let ret = validate_jwt(
