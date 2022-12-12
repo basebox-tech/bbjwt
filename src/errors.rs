@@ -88,3 +88,16 @@ impl BBError {
     }
   }
 }
+
+
+impl From <base64::DecodeError> for BBError {
+  fn from(err: base64::DecodeError) -> Self {
+    BBError::DecodeError(err.to_string())
+  }
+}
+
+impl From<serde_json::Error> for BBError {
+  fn from(err: serde_json::Error) -> Self {
+      BBError::JSONError(err.to_string())
+  }
+}

@@ -130,7 +130,7 @@ extern crate serde_derive;
 pub use keystore::KeyStore;
 use errors::{BBResult, BBError};
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::{SystemTime, Duration, UNIX_EPOCH}};
 
 use serde::de::{DeserializeOwned};
 use keystore::base64_config;
@@ -166,28 +166,24 @@ pub enum ValidationStep {
   NotExpired,
   /// "sub" claim must be present and non-empty.
   HasSubject,
-  /// "roles" claim must be present and non-empty.
-  HasRoles,
   /// "groups" claim must be present and non-empty.
   HasGroups,
-  /// "entitlements" claim must be present and non-empty.
-  HasEntitlements,
-  /// "email" claim must be present and non-empty.
-  HasEmail
 }
 
 ///
 /// All claims defined in a JWT.
 ///
-/// This is created and returned to the caller upon successful validation.
+/// This is created and returned to the caller upon successful validation. The claims present do vary,
+/// and the caller knows best what fields to expect, so this struct simply contains a copy of the parsed
+/// JSON fields.
 ///
 pub struct JWTClaims {
   /// JOSE header fields of the JWTs, see [RFC7519](https://www.rfc-editor.org/rfc/rfc7519#section-5)
-  headers: HashMap<String, String>,
+  headers: serde_json::Value,
   /// Claims (fields) found in the JWT. What fields are present depends on the purpose of
   /// the JWT. For OpenID Connect ID tokens see
   /// [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken)
-  claims: HashMap<String, String>
+  claims: serde_json::Value,
 }
 
 
@@ -210,6 +206,29 @@ struct JOSEHeader {
   alg: String,
   /// ID of the public key used to sign this JWT
   kid: Option<String>,
+}
+
+///
+/// Audience enum; supports a single or multiple audiences.
+///
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Audience {
+  Single(String),
+  Multi(Vec<String>),
+}
+
+///
+/// Claims that can be subject to validation.
+///
+#[derive(Deserialize)]
+struct ValidationClaims {
+  iss: Option<String>,
+  sub: Option<String>,
+  exp: Option<u64>,
+  aud: Option<Audience>,
+  nonce: Option<String>,
+  groups: Option<Vec<String>>,
 }
 
 /* --- start of code ---------------------------------------------------------------------------- */
@@ -282,7 +301,9 @@ pub async fn validate_jwt(jwt: &str,
   }
 
   /* Get the JOSE header */
-  let kid_hdr: JOSEHeader = deserialize_b64(parts[0])?;
+  let hdr_json = base64::decode_config(parts[0], base64_config())?;
+  let kid_hdr: JOSEHeader = serde_json::from_slice(&hdr_json)
+    .map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
   /* get public key for signature validation */
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
@@ -291,27 +312,119 @@ pub async fn validate_jwt(jwt: &str,
   let mut verifier = pubkey.verifier()?;
   check_jwt_signature(&parts, &mut verifier)?;
 
+  /* decode the payload so we can verify its contents */
+  let payload_json = base64::decode_config(parts[1], base64_config())?;
+  let claims: ValidationClaims = serde_json::from_slice(&payload_json)
+    .map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
+
+  /* Be nice: return all validation errors at once */
+  let mut validation_errors = Vec::<&str>::new();
+
   for step in validation_steps {
-    match step {
-      ValidationStep::Audience(aud) => {
-
-      },
-
-      ValidationStep::HasEmail => {
-
-      }
-      ValidationStep::Issuer(iss) => todo!(),
-      ValidationStep::Nonce(nonce) => todo!(),
-      ValidationStep::NotExpired => todo!(),
-      ValidationStep::HasSubject => todo!(),
-      ValidationStep::HasRoles => todo!(),
-      ValidationStep::HasGroups => todo!(),
-      ValidationStep::HasEntitlements => todo!(),
+    if let Some(error) = validate_claim(&claims, step) {
+      validation_errors.push(error);
     }
   }
 
-  Err(BBError::Other("Not implemented yet :-)".to_string()))
+  if validation_errors.len() > 0 {
+    let mut err = "One or more claims failed to validate:\n".to_string();
+    err.push_str(&validation_errors.join("\n"));
+    return Err(BBError::ClaimInvalid(err));
+  }
+
+  /* Success! */
+  Ok(JWTClaims {
+    headers: serde_json::from_slice(&hdr_json)?,
+    claims: serde_json::from_slice(&payload_json)?,
+  })
 }
+
+///
+/// Validate a single claim.
+///
+/// If a claim is None, this is treated as a validation error.
+///
+/// # Arguments
+///
+/// `claims` - claims extracted from the JWT
+/// `step` - the validation step to perform
+///
+/// # Returns
+///
+/// None on success or an error string on validation error.
+///
+fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'static str> {
+
+  match step {
+
+    ValidationStep::Audience(aud) => {
+      if let Some(claims_aud) = &claims.aud {
+        match claims_aud {
+          Audience::Single(single) => {
+            if single != aud {
+              return Some("'aud' does not match");
+            }
+          },
+          Audience::Multi(multi) => {
+            if !multi.contains(aud) {
+              return Some("'aud' claims don't match");
+            }
+          }
+        }
+      } else {
+        return Some("'aud' not set");
+      }
+    },
+
+    ValidationStep::Issuer(iss) => {
+      if let Some(claims_iss) = &claims.iss {
+        if claims_iss != iss {
+          return Some("'iss' does not match");
+        }
+      } else {
+        return Some("'iss' is missing");
+      }
+    },
+
+    ValidationStep::Nonce(nonce) => {
+      if let Some(claims_nonce) = &claims.nonce {
+        if claims_nonce != nonce {
+          return Some("'nonce' does not match");
+        }
+      } else {
+        return Some("'noncev is missing");
+      }
+    },
+
+    ValidationStep::NotExpired => {
+      if let Some(exp) = &claims.exp {
+        /* get current time; if this fails, we can assume a wrong time setting and panic */
+        let now = SystemTime::now()
+          .duration_since(UNIX_EPOCH)
+          .expect("System time is wrong.");
+        if Duration::from_secs(*exp) < now {
+          return Some("Token has expired.");
+        }
+      }
+    },
+
+    ValidationStep::HasSubject => {
+      if claims.sub.is_none() {
+        return Some("'sub' is missing");
+      }
+    },
+
+    ValidationStep::HasGroups => {
+      if claims.groups.is_none() {
+        return Some("'groups' is missing");
+      }
+    },
+  }
+
+  None
+
+}
+
 
 ///
 /// Check if a JWT's signature is correct.

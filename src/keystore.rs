@@ -23,6 +23,7 @@ use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
 use url::Url;
+use std::fmt;
 
 extern crate openssl;
 extern crate serde;
@@ -206,14 +207,17 @@ impl EcCurve {
 }
 
 
-impl BBKey {
-
-  ///
-  /// Return verbose key id for logging etc.
-  ///
-  fn key_id(&self) -> String {
-    self.kid.clone().unwrap_or_else(||"<first>".to_string())
+impl fmt::Display for BBKey {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /* Use kid for keys that have it, otherwise no_kid */
+    let kid = self.kid.clone().unwrap_or_else(||"<no_kid>".to_string());
+    write!(f, "{}", kid)
   }
+
+}
+
+
+impl BBKey {
 
   ///
   /// Return an OpenSSL verifier using this key.
@@ -229,13 +233,13 @@ impl BBKey {
           KeyAlgorithm::RS384 => MessageDigest::sha384(),
           KeyAlgorithm::RS512 => MessageDigest::sha512(),
           KeyAlgorithm::Other => return Err(
-            BBError::Other(format!("Unsupported key algorithm for key '{}'.", self.key_id()))
+            BBError::Other(format!("Unsupported key algorithm for key '{}'.", &self))
           ),
         };
         /* create verifier */
         Verifier::new(message_digest, &self.key).map_err(
           |e| BBError::Other(
-            format!("Failed to create verifier for RSA key '{}': {:?}", self.key_id(), e)
+            format!("Failed to create verifier for RSA key '{}': {:?}", &self, e)
           )
         )?
       }
@@ -245,12 +249,12 @@ impl BBKey {
         let nid = curve.nid().ok_or_else(|| BBError::Other("Unknown curve".to_string()))?;
         let message_digest = MessageDigest::from_nid(nid)
           .ok_or_else(||BBError::Other(
-            format!("Failed to get curve NID for key '{}'", self.key_id()))
+            format!("Failed to get curve NID for key '{}'", &self))
           )?;
         /* create verifier */
         Verifier::new(message_digest, &self.key).map_err(
           |e| BBError::Other(
-            format!("Failed to create verifier for EC key '{}': {:?}", self.key_id(), e)
+            format!("Failed to create verifier for EC key '{}': {:?}", &self, e)
           )
         )?
       },
@@ -259,14 +263,14 @@ impl BBKey {
         /* Ed does not use a message digest */
         Verifier::new_without_digest(&self.key).map_err(
           |e| BBError::Other(
-            format!("Failed to create verifier for Ed key '{}': {:?}", self.key_id(), e)
+            format!("Failed to create verifier for Ed key '{}': {:?}", &self, e)
           )
         )?
       },
 
       KeyType::Unsupported => {
         return Err(BBError::Other(
-          format!("Unsupported key type for key '{}'", self.key_id()))
+          format!("Unsupported key type for key '{}'", &self))
         );
       },
 
@@ -507,6 +511,67 @@ impl KeyStore {
     let mut keyset = self.keyset.write()
       .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
     keyset.push(pubkey_from_jwk(&key)?);
+    Ok(())
+  }
+
+  ///
+  /// Add a public RSA key from a PEM string.
+  ///
+  /// # Arguments
+  ///
+  /// `pem` - PEM encoded public RSA key
+  /// `kid` - optional key id
+  /// `alg` - algorithm
+  ///
+  pub fn add_rsa_pem_key(&self, pem: &str, kid: Option<&str>, alg: KeyAlgorithm) -> BBResult<()> {
+    let rsa = openssl::rsa::Rsa::public_key_from_pem(pem.as_bytes()).map_err(
+      |e| BBError::Other(format!("Could not read RSA pem: {:?}", e))
+    )?;
+
+    let bbkey = BBKey {
+      kid: kid.map(|v| v.to_string()),
+      key: PKey::from_rsa(rsa)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from PEM: {}", e))
+        )?,
+        kty: KeyType::RSA,
+        crv: None,
+        alg: Some(alg),
+      };
+
+    let mut keyset = self.keyset.write()
+      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    keyset.push(bbkey);
+    Ok(())
+  }
+
+  ///
+  /// Add a public EC key from a PEM string.
+  ///
+  /// # Arguments
+  ///
+  /// `pem` - PEM encoded public EC key
+  /// `kid` - optional key id
+  ///
+  pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
+    let eckey = EcKey::public_key_from_pem(pem.as_bytes()).map_err(
+      |e| BBError::Other(format!("Could not read RSA pem: {:?}", e))
+    )?;
+
+    let bbkey = BBKey {
+      kid: kid.map(|v| v.to_string()),
+      key: PKey::from_ec_key(eckey)
+        .map_err(
+          |e| BBError::JWKInvalid(format!("Failed to create PKey/EC from PEM: {}", e))
+        )?,
+        kty: KeyType::EC,
+        crv: Some(curve),
+        alg: None,
+      };
+
+    let mut keyset = self.keyset.write()
+      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    keyset.push(bbkey);
     Ok(())
   }
 
@@ -896,7 +961,7 @@ mod tests {
   }
 
   ///
-  /// Test keystore without loading from URL.
+  /// Test keystore with local pub keys.
   ///
   #[tokio::test]
   async fn test_keystore_local() {
