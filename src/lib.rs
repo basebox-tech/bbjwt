@@ -456,18 +456,3 @@ fn check_jwt_signature(jwt_parts: &[&str], verifier: &mut Verifier) -> BBResult<
 
 }
 
-///
-/// Base64 decode a string and deserialize it using serde_json.
-///
-/// # Arguments
-///
-/// `b64` - base64 encoded JSON string; a JOSE header maybe.
-///
-fn deserialize_b64<T: DeserializeOwned>(b64: &str) -> BBResult<T> {
-  /* decode base64 */
-  let json = base64::decode_config(b64, base64_config())
-    .map_err(|e| BBError::DecodeError(format!("Failed to decode JWT: {:?}", e)))?;
-  /* deserialize JSON string */
-  serde_json::from_slice(&json)
-    .map_err(|e| BBError::JSONError(format!("{:?}", e)))
-}

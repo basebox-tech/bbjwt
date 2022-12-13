@@ -34,13 +34,17 @@ fn load_asset(name: &str) -> String {
 }
 
 ///
-/// Validate RSA256 JWT.
+/// Validate valid RSA256 JWT.
 ///
 #[tokio::test]
-async fn test_rsa256() {
+async fn rsa256_valid_jwt() {
 
   let ks = KeyStore::new().await.unwrap();
-  ks.add_rsa_pem_key(&load_asset("rsa256.pub.key"), Some("key-rsa256-1"), KeyAlgorithm::RS256).expect("Failed to add RSA256 key");
+  ks.add_rsa_pem_key(
+    &load_asset("rsa256.pub.key"),
+    Some("key-rsa256-1"),
+    KeyAlgorithm::RS256)
+    .expect("Failed to add RSA256 key");
   assert_eq!(ks.keys_len(), 1);
 
   /* verify valid token */
@@ -52,29 +56,67 @@ async fn test_rsa256() {
   )
   .await
   .expect("Valid JWT did not validate");
+}
 
-  /* wrong issuer, must fail */
+
+///
+/// Validate expired RSA256 JWT with wrong issuer; all errors must be reported.
+///
+#[tokio::test]
+async fn rsa256_invalid_claims_expired_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_rsa_pem_key(
+    &load_asset("rsa256.pub.key"),
+    Some("key-rsa256-1"),
+    KeyAlgorithm::RS256)
+    .expect("Failed to add RSA256 key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify expired token, must fail */
+  let jwt = load_asset("id_token_rsa256_expired.txt");
   let ret = validate_jwt(
     &jwt,
     &default_validations("https://kcdev.basebox.health:8443/realms/WRONG", None, None),
     &ks
   )
   .await;
+
   if let Err(err) = ret {
-    assert!(err.to_string().contains("iss"));
+    /* all errors must be in the error string */
+    let msg = err.to_string();
+    assert!(msg.contains("iss"), "iss error not reported");
+    assert!(msg.contains("expired"), "expiration not reported");
   } else {
-    assert!(false, "Wrong issuer validated ok");
+    /* no error */
+    panic!("Invalid JWT validated ok!");
   }
+}
+
+
+///
+/// Validate expired RSA256 JWT.
+///
+#[tokio::test]
+#[should_panic(expected = "expired")]
+async fn rsa256_valid_claims_expired_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_rsa_pem_key(
+    &load_asset("rsa256.pub.key"),
+    Some("key-rsa256-1"),
+    KeyAlgorithm::RS256)
+    .expect("Failed to add RSA256 key");
+  assert_eq!(ks.keys_len(), 1);
 
   /* verify expired token, must fail */
   let jwt = load_asset("id_token_rsa256_expired.txt");
-  let ret = validate_jwt(
+  validate_jwt(
     &jwt,
     &default_validations("https://kcdev.basebox.health:8443/realms/testing", None, None),
     &ks
   )
-  .await;
-  assert!(ret.is_err(), "Expired token validated ok!");
+  .await
+  .unwrap();
 
 }
-
