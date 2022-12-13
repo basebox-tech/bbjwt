@@ -198,7 +198,7 @@ impl EcCurve {
   ///
   pub fn nid(&self) -> Option<Nid> {
     match *self {
-      EcCurve::P256 => Some(Nid::X9_62_PRIME256V1),
+      EcCurve::P256 => Some(Nid::SECP256K1),
       EcCurve::P384 => Some(Nid::SECP384R1),
       EcCurve::P521 => Some(Nid::SECP521R1),
       _ => None
@@ -246,10 +246,12 @@ impl BBKey {
 
       KeyType::EC => {
         let curve = self.crv.clone().unwrap_or(EcCurve::P256);
-        let nid = curve.nid().ok_or_else(|| BBError::Other("Unknown curve".to_string()))?;
+        let nid = curve.nid().ok_or_else(
+          || BBError::Other(format!("Unknown curve for EC key '{}'", &self))
+        )?;
         let message_digest = MessageDigest::from_nid(nid)
           .ok_or_else(||BBError::Other(
-            format!("Failed to get curve NID for key '{}'", &self))
+            format!("Failed to get message digest for EC key '{}'", &self))
           )?;
         /* create verifier */
         Verifier::new(message_digest, &self.key).map_err(
