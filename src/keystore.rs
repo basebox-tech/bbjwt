@@ -86,13 +86,25 @@ pub enum KeyType {
 }
 
 ///
-/// Key algorithms
+/// Key algorithms.
+///
+/// A list of values allowed in a JOSE header is here:
+/// <https://www.rfc-editor.org/rfc/rfc7518#section-3.1>
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum KeyAlgorithm {
+  /// RSASSA-PKCS-v1_5 using SHA-256 hash algorithm (recommended).
   RS256,
+  /// RSASSA-PKCS-v1_5 using SHA-384 hash algorithm (optional).
   RS384,
+  /// RSASSA-PKCS-v1_5 using SHA-512 hash algorithm (optional).
   RS512,
+  /// ECDSA using P-256 (secp256r1) curve and SHA-256 hash algorithm (recommended).
+  ES256,
+  /// ECDSA using P-384 curve and SHA-384 hash algorithm (optional).
+  ES384,
+  /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional).
+  ES512,
   #[serde(other)]
   Other,
 }
@@ -102,6 +114,8 @@ pub enum KeyAlgorithm {
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum EcCurve {
+  /// secp256r1
+  /// <https://www.javadoc.io/doc/com.nimbusds/nimbus-jose-jwt/6.0/com/nimbusds/jose/JWSAlgorithm.html#ES256>
   #[serde(rename = "P-256")]
   P256,
   #[serde(rename = "P-384")]
@@ -199,7 +213,7 @@ impl KeyAlgorithm {
       KeyAlgorithm::RS256 => Some(MessageDigest::sha256()),
       KeyAlgorithm::RS384 => Some(MessageDigest::sha384()),
       KeyAlgorithm::RS512 => Some(MessageDigest::sha512()),
-      KeyAlgorithm::Other => None,
+      _ => None,
     }
   }
 }
