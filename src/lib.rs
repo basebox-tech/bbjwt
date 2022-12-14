@@ -133,7 +133,7 @@ use errors::{BBResult, BBError};
 use std::{time::{SystemTime, Duration, UNIX_EPOCH}};
 
 use keystore::base64_config;
-use openssl::sign::Verifier;
+use keystore::{BBKey, KeyAlgorithm};
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -202,7 +202,7 @@ pub struct JWTClaims {
 #[allow(dead_code)]
 struct JOSEHeader {
   /// Algorithm
-  alg: String,
+  alg: KeyAlgorithm,
   /// ID of the public key used to sign this JWT
   kid: Option<String>,
 }
@@ -308,8 +308,7 @@ pub async fn validate_jwt(jwt: &str,
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
 
   /* First, we verify the signature. */
-  let mut verifier = pubkey.verifier()?;
-  check_jwt_signature(&parts, &mut verifier)?;
+  check_jwt_signature(&parts, &pubkey)?;
 
   /* decode the payload so we can verify its contents */
   let payload_json = base64::decode_config(parts[1], base64_config())?;
@@ -325,7 +324,7 @@ pub async fn validate_jwt(jwt: &str,
     }
   }
 
-  if validation_errors.len() > 0 {
+  if !validation_errors.is_empty() {
     let mut err = "One or more claims failed to validate:\n".to_string();
     err.push_str(&validation_errors.join("\n"));
     return Err(BBError::ClaimInvalid(err));
@@ -433,7 +432,8 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
 /// jwt_parts: JWT split by '.'; must be a vector of 3 strings
 /// verifier: The OpenSSL verifier to use
 ///
-fn check_jwt_signature(jwt_parts: &[&str], verifier: &mut Verifier) -> BBResult<()> {
+fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<()> {
+
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
@@ -441,16 +441,5 @@ fn check_jwt_signature(jwt_parts: &[&str], verifier: &mut Verifier) -> BBResult<
     .map_err(|e|BBError::DecodeError(format!("{:?}", e))
   )?;
 
-  /* verify signature */
-  verifier.update(jwt_data.as_bytes()).map_err(
-    |e| BBError::DecodeError(format!("{:?}", e))
-  )?;
-
-  match verifier.verify(&sig)
-    .map_err(|e|BBError::Other(format!("Failed to check signature: {:?}", e))
-  )? {
-    true => Ok(()),
-    false => Err(BBError::SignatureInvalid())
-  }
-
+  pubkey.verify_signature(jwt_data.as_bytes(), &sig)
 }

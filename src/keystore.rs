@@ -264,6 +264,45 @@ impl fmt::Display for BBKey {
 impl BBKey {
 
   ///
+  /// Verify a signature.
+  ///
+  /// # Arguments
+  ///
+  /// * `payload` - the signed data
+  /// * `signature` - the signature to verify
+  ///
+  ///
+  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<()> {
+
+    match self.alg.as_ref().unwrap_or(&KeyAlgorithm::RS256) {
+
+      KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512 => {
+        let mut verifier = self.verifier()?;
+        verifier.update(payload).map_err(
+          |e| BBError::DecodeError(format!("{:?}", e))
+        )?;
+
+        match verifier.verify(signature)
+          .map_err(|e|BBError::Other(format!("Failed to check RSA signature: {:?}", e))
+        )? {
+          true => Ok(()),
+          false => Err(BBError::SignatureInvalid())
+        }
+      },
+
+      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => {
+        todo!()
+      },
+
+      _ => {
+        Err(BBError::Other(format!("Unsupported key algorithm for key '{}'", *self)))
+      }
+
+    }
+
+  }
+
+  ///
   /// Return an OpenSSL verifier using this key.
   ///
   pub fn verifier(&self) -> BBResult<Verifier> {
