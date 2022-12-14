@@ -130,11 +130,9 @@ extern crate serde_derive;
 pub use keystore::KeyStore;
 use errors::{BBResult, BBError};
 
-use std::{collections::HashMap, time::{SystemTime, Duration, UNIX_EPOCH}};
+use std::{time::{SystemTime, Duration, UNIX_EPOCH}};
 
-use serde::de::{DeserializeOwned};
 use keystore::base64_config;
-
 use openssl::sign::Verifier;
 
 /* --- mods ------------------------------------------------------------------------------------- */
@@ -201,6 +199,7 @@ pub struct JWTClaims {
 /// I have no idea if `jku` and/or `jwk` fields are actually being used...
 ///
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct JOSEHeader {
   /// Algorithm
   alg: String,
@@ -455,4 +454,3 @@ fn check_jwt_signature(jwt_parts: &[&str], verifier: &mut Verifier) -> BBResult<
   }
 
 }
-

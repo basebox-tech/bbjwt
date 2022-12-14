@@ -189,7 +189,36 @@ impl Default for JWKS {
 }
 
 
+impl KeyAlgorithm {
+
+  ///
+  /// Return message digest for an algorithm.
+  ///
+  pub fn message_digest(&self) -> Option<MessageDigest> {
+    match *self {
+      KeyAlgorithm::RS256 => Some(MessageDigest::sha256()),
+      KeyAlgorithm::RS384 => Some(MessageDigest::sha384()),
+      KeyAlgorithm::RS512 => Some(MessageDigest::sha512()),
+      KeyAlgorithm::Other => None,
+    }
+  }
+}
+
 impl EcCurve {
+
+  ///
+  /// Return message digest for a curve.
+  ///
+  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
+  ///
+  pub fn message_digest(&self) -> Option<MessageDigest> {
+    match *self {
+      EcCurve::P256 => Some(MessageDigest::sha256()),
+      EcCurve::P384 => Some(MessageDigest::sha384()),
+      EcCurve::P521 => Some(MessageDigest::sha512()),
+      _ => None
+    }
+  }
 
   ///
   /// Map elliptic curve variant to its matching OpenSSL NID.
@@ -204,6 +233,7 @@ impl EcCurve {
       _ => None
     }
   }
+
 }
 
 
@@ -228,14 +258,10 @@ impl BBKey {
 
       KeyType::RSA => {
         /* Get message digest for the algorithm used */
-        let message_digest = match self.alg.clone().unwrap_or(KeyAlgorithm::RS256) {
-          KeyAlgorithm::RS256 => MessageDigest::sha256(),
-          KeyAlgorithm::RS384 => MessageDigest::sha384(),
-          KeyAlgorithm::RS512 => MessageDigest::sha512(),
-          KeyAlgorithm::Other => return Err(
-            BBError::Other(format!("Unsupported key algorithm for key '{}'.", &self))
-          ),
-        };
+        let alg = self.alg.clone().unwrap_or(KeyAlgorithm::RS256);
+        let message_digest = alg.message_digest().ok_or_else(||BBError::Other(
+          format!("Failed to get message digest for key '{}'.", &self))
+        )?;
         /* create verifier */
         Verifier::new(message_digest, &self.key).map_err(
           |e| BBError::Other(
@@ -246,10 +272,7 @@ impl BBKey {
 
       KeyType::EC => {
         let curve = self.crv.clone().unwrap_or(EcCurve::P256);
-        let nid = curve.nid().ok_or_else(
-          || BBError::Other(format!("Unknown curve for EC key '{}'", &self))
-        )?;
-        let message_digest = MessageDigest::from_nid(nid)
+        let message_digest = curve.message_digest()
           .ok_or_else(||BBError::Other(
             format!("Failed to get message digest for EC key '{}'", &self))
           )?;
