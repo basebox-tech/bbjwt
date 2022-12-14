@@ -42,8 +42,8 @@ use openssl::hash::MessageDigest;
 
 /* --- constants -------------------------------------------------------------------------------- */
 
-/// Reload interval factor; the lifetime of keys etc. is multiplied with this factor
-/// to determine the point in time after which the information is considered outdated.
+/// The lifetime of keys etc. is multiplied with this factor to determine the point in time
+/// after which the information is considered outdated.
 /// See [`KeyStore::set_reload_factor`] for more info.
 pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 
@@ -53,7 +53,7 @@ pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 ///
 /// A key as we store it in the key store.
 ///
-/// This is basically an OpenSSL PKey<Public> with required fields from the original JWK.
+/// This is basically an OpenSSL [`PKey<Public>`] with required fields from the original JWK.
 ///
 #[derive(Debug, Clone)]
 pub struct BBKey {
@@ -660,7 +660,7 @@ impl KeyStore {
   /// keys expire in 10 minutes, setting the reload interval to 0.75 will consider the keys
   /// to be expired after 7.5 minutes and the [`KeyStore::should_reload`] function returns true.
   ///
-  /// This method does **not** update the reload time. Call [`load_keys`] to force an update.
+  /// This method does **not** update the reload time. Call [`KeyStore::load_keys`] to force an update.
   ///
   pub fn set_reload_factor(&mut self, interval: f64) {
     self.reload_factor = interval;
