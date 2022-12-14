@@ -432,7 +432,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
 /// jwt_parts: JWT split by '.'; must be a vector of 3 strings
 /// verifier: The OpenSSL verifier to use
 ///
-fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<()> {
+fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
 
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);

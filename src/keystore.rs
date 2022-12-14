@@ -22,6 +22,7 @@
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use crate::errors::*;
+use openssl::ecdsa::EcdsaSig;
 use url::Url;
 use std::fmt;
 
@@ -37,7 +38,7 @@ use openssl::pkey::{PKey, Public};
 use openssl::nid::Nid;
 use openssl::rsa::Rsa;
 use openssl::pkey::Id;
-use openssl::hash::MessageDigest;
+use openssl::hash::{hash, MessageDigest};
 
 
 /* --- constants -------------------------------------------------------------------------------- */
@@ -66,7 +67,7 @@ pub struct BBKey {
   /// Curve for elliptic curve algorithms
   crv: Option<EcCurve>,
   /// Hash algorithm
-  alg: Option<KeyAlgorithm>
+  alg: KeyAlgorithm,
 }
 
 ///
@@ -210,10 +211,31 @@ impl KeyAlgorithm {
   ///
   pub fn message_digest(&self) -> Option<MessageDigest> {
     match *self {
-      KeyAlgorithm::RS256 => Some(MessageDigest::sha256()),
-      KeyAlgorithm::RS384 => Some(MessageDigest::sha384()),
-      KeyAlgorithm::RS512 => Some(MessageDigest::sha512()),
+      KeyAlgorithm::RS256 | KeyAlgorithm::ES256 => Some(MessageDigest::sha256()),
+      KeyAlgorithm::RS384 | KeyAlgorithm::ES384 => Some(MessageDigest::sha384()),
+      KeyAlgorithm::RS512 | KeyAlgorithm::ES512 => Some(MessageDigest::sha512()),
       _ => None,
+    }
+  }
+
+  ///
+  /// Return default algorithm - should none be specified.
+  ///
+  pub fn default() -> Self {
+    KeyAlgorithm::RS256
+  }
+
+  ///
+  /// Return signature length.
+  ///
+  /// Only applies to elliptic curve algorithms.
+  ///
+  pub fn signature_length(&self) -> usize {
+    match *self {
+      KeyAlgorithm::ES256 => 64,
+      KeyAlgorithm::ES384 => 96,
+      KeyAlgorithm::ES512 =>132,
+      _ => 0
     }
   }
 }
@@ -248,6 +270,17 @@ impl EcCurve {
     }
   }
 
+  ///
+  /// Return hashing algorithm used with this curve.
+  ///
+  pub fn algorithm(&self) -> KeyAlgorithm {
+    match *self {
+      EcCurve::P256 => KeyAlgorithm::ES256,
+      EcCurve::P384 => KeyAlgorithm::ES384,
+      EcCurve::P521 => KeyAlgorithm::ES512,
+      _ => KeyAlgorithm::Other
+    }
+  }
 }
 
 
@@ -271,10 +304,9 @@ impl BBKey {
   /// * `payload` - the signed data
   /// * `signature` - the signature to verify
   ///
-  ///
-  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<()> {
+  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<bool> {
 
-    match self.alg.as_ref().unwrap_or(&KeyAlgorithm::RS256) {
+    match self.alg {
 
       KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512 => {
         let mut verifier = self.verifier()?;
@@ -285,13 +317,45 @@ impl BBKey {
         match verifier.verify(signature)
           .map_err(|e|BBError::Other(format!("Failed to check RSA signature: {:?}", e))
         )? {
-          true => Ok(()),
+          true => Ok(true),
           false => Err(BBError::SignatureInvalid())
         }
       },
 
       KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => {
-        todo!()
+        let ec_key = self.key.ec_key().map_err(
+          |e| BBError::Other(format!("Failed to extract EC key from public key: {:?}", e))
+        )?;
+
+        let sig_len = signature.len();
+        if sig_len != self.alg.signature_length() {
+          return Err(BBError::SignatureInvalid());
+        }
+
+        /* Create Ecdsa signature from signature bytes */
+        let m = signature.len() / 2;
+
+        let r = BigNum::from_slice(&signature[..m]).map_err(
+          |e| BBError::Other(format!("Bignum error: {}", e))
+        )?;
+        let s = BigNum::from_slice(&signature[m..sig_len]).map_err(
+          |e| BBError::Other(format!("Bignum error: {}", e))
+        )?;
+        let sig = EcdsaSig::from_private_components(r, s).map_err(
+          |e| BBError::Other(format!("Could not create Ecdsa Signature: {}", e))
+        )?;
+
+        /* calculate signature from payload */
+        let digest = self.alg.message_digest().ok_or(
+          BBError::Other("Unknown algorithm digest".to_string())
+        )?;
+        let hash = hash(digest, payload).map_err(
+          |e| BBError::Other(format!("Failed to hash payload: {}", e))
+        )?;
+
+        Ok(sig.verify(&hash, &ec_key).map_err(
+          |e| BBError::Other(format!("Failed to verify EC signature: {}", e))
+        )?)
       },
 
       _ => {
@@ -311,8 +375,7 @@ impl BBKey {
 
       KeyType::RSA => {
         /* Get message digest for the algorithm used */
-        let alg = self.alg.clone().unwrap_or(KeyAlgorithm::RS256);
-        let message_digest = alg.message_digest().ok_or_else(||BBError::Other(
+        let message_digest = self.alg.message_digest().ok_or_else(||BBError::Other(
           format!("Failed to get message digest for key '{}'.", &self))
         )?;
         /* create verifier */
@@ -324,17 +387,8 @@ impl BBKey {
       }
 
       KeyType::EC => {
-        let curve = self.crv.clone().unwrap_or(EcCurve::P256);
-        let message_digest = curve.message_digest()
-          .ok_or_else(||BBError::Other(
-            format!("Failed to get message digest for EC key '{}'", &self))
-          )?;
-        /* create verifier */
-        Verifier::new(message_digest, &self.key).map_err(
-          |e| BBError::Other(
-            format!("Failed to create verifier for EC key '{}': {:?}", &self, e)
-          )
-        )?
+        /* EC keys do not use a verifier */
+        return Err(BBError::Other("EC key has no verifier".to_string()));
       },
 
       KeyType::OKP => {
@@ -489,7 +543,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
     key,
     kty: jwk.kty.clone(),
     crv: jwk.crv.clone(),
-    alg: jwk.alg.clone(),
+    alg: jwk.alg.clone().unwrap_or(KeyAlgorithm::default()),
   })
 
 }
@@ -614,7 +668,7 @@ impl KeyStore {
         )?,
         kty: KeyType::RSA,
         crv: None,
-        alg: Some(alg),
+        alg: alg,
       };
 
     let mut keyset = self.keyset.write()
@@ -632,19 +686,19 @@ impl KeyStore {
   /// `kid` - optional key id
   ///
   pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
-    let eckey = EcKey::public_key_from_pem(pem.as_bytes()).map_err(
+    let ec_key = EcKey::public_key_from_pem(pem.as_bytes()).map_err(
       |e| BBError::Other(format!("Could not read RSA pem: {:?}", e))
     )?;
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
-      key: PKey::from_ec_key(eckey)
+      key: PKey::from_ec_key(ec_key)
         .map_err(
           |e| BBError::JWKInvalid(format!("Failed to create PKey/EC from PEM: {}", e))
         )?,
         kty: KeyType::EC,
+        alg: curve.algorithm(),
         crv: Some(curve),
-        alg: None,
       };
 
     let mut keyset = self.keyset.write()
