@@ -43,7 +43,7 @@ a local buffer/file.
 
 See the following example:
 
-```rust,no_run
+```rust
 use bbjwt::KeyStore;
 
 #[tokio::main]
@@ -74,7 +74,7 @@ async fn main() {
 
 This example loads the keys from a local buffer.
 
-```rust,no_run
+```rust
 use bbjwt::KeyStore;
 
 #[tokio::main]
@@ -102,14 +102,22 @@ async fn main() {
 
 JWTs are passed as Base64 encoded strings; for details about this format, see e.g. <https://jwt.io>.
 
-```rust,no_run
-use bbjwt::KeyStore;
+```rust
+use bbjwt::{KeyStore, default_validations, validate_jwt};
 
 #[tokio::main]
 async fn main() {
   // Create a keystore; see examples above
   let keystore = KeyStore::new_from_url("https://server.tld/keyset").await.unwrap();
 
+  // Validate a JWT
+  validate_jwt(
+    "<Base64 encoded JWT>",
+    &default_validations("https://idp.domain.url/realm/testing", None, None),
+    &keystore
+  )
+  .await
+  .unwrap();
 }
 ```
 
