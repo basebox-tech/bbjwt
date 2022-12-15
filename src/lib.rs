@@ -112,13 +112,16 @@
 //!   let keystore = KeyStore::new_from_url("https://server.tld/keyset").await.unwrap();
 //!
 //!   // Validate a JWT
-//!   validate_jwt(
+//!   let jwt = validate_jwt(
 //!     "<Base64 encoded JWT>",
 //!     &default_validations("https://idp.domain.url/realm/testing", None, None),
 //!     &keystore
 //!   )
 //!   .await
 //!   .unwrap();
+//!
+//!   // Read some claims (JWT fields)
+//!   assert_eq!(jwt.claims["nonce"].as_str().unwrap(), "UZ1BSZFvy7jKkj1o9p3r7w");
 //! }
 //! ```
 //!
