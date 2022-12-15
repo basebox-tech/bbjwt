@@ -552,7 +552,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
       };
 
       PKey::public_key_from_raw_bytes(&bytes, curve_id)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to read Ed key for {kid}: {}", e)))?
+        .map_err(|e| BBError::JWKInvalid(format!("Failed to read EdDSA key for {kid}: {}", e)))?
     }
 
     _ => {
@@ -730,7 +730,7 @@ impl KeyStore {
   }
 
   ///
-  /// Add a public Ed25519 or Ed448 key from raw bytes.
+  /// Add a public Ed25519 or Ed448 key from a PEM string.
   ///
   /// # Arguments
   ///
@@ -743,16 +743,6 @@ impl KeyStore {
     let key = PKey::public_key_from_pem(pem.as_bytes()).map_err(
       |e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e))
     )?;
-
-    // let key = match curve {
-    //   EcCurve::Ed25519 => PKey::public_key_from_raw_bytes(&pemkey.raw_public_key().unwrap(), openssl::pkey::Id::ED25519),
-    //   EcCurve::Ed448 => PKey::public_key_from_raw_bytes(&pemkey.raw_public_key().unwrap(), openssl::pkey::Id::ED448),
-    //   _ => {
-    //     return Err(BBError::Other("Invalid curve for EdDSA pub key".to_string()));
-    //   }
-    // }.map_err(|e| {
-    //   BBError::Other(format!("Failed to create EdDSA pub key: {}", e))
-    // })?;
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),

@@ -34,8 +34,9 @@
 //! * ES256
 //! * ES384
 //! * ES512
+//! * Ed25519
 //!
-//! Encrypted JWTs are not supported for now.
+//! Encrypted JWTs are not supported.
 //!
 //! ## Building
 //!

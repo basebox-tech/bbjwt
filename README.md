@@ -33,8 +33,9 @@ bbjwt supports the following signing algorithms:
 * ES256
 * ES384
 * ES512
+* Ed25519
 
-Encrypted JWTs are not supported for now.
+Encrypted JWTs are not supported.
 
 ## Building
 
@@ -143,4 +144,3 @@ Copyright (c) 2022 basebox GmbH, all rights reserved.
 License: MIT
 
 Made with ❤️ and Emacs :-)
-
