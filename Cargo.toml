@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
+homepage = "https://basebox.tech"
 authors = [
   "Markus Thielen <markus.thielen@basebox.tech>",
 ]

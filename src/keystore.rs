@@ -452,8 +452,8 @@ pub fn base64_config() -> base64::Config {
 ///
 /// # Arguments
 ///
-/// `b64` - base64 encoded binary value; if None, an error is returned
-/// `error_context` - a string to include in error messages
+/// * `b64` - base64 encoded binary value; if None, an error is returned
+/// * `error_context` - a string to include in error messages
 ///
 fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
   let bytes = base64::decode_config(b64, base64_config()).map_err(
@@ -474,7 +474,7 @@ fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
 ///
 /// # Arguments
 ///
-/// `jwk` - the JWK to convert.
+/// * `jwk` - the JWK to convert.
 ///
 /// # Returns
 ///
@@ -594,7 +594,7 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `surl`: URL to load the keys from.
+  /// * `surl`: URL to load the keys from.
   ///
   pub async fn new_from_url(surl: &str) -> BBResult<Self> {
     /* make sure the URL is safe (https) */
@@ -656,7 +656,7 @@ impl KeyStore {
   /// Manually add a key to the keystore.
   ///
   /// # Arguments
-  /// `key_json` - JSON string containing a [`JWK`].
+  /// * `key_json` - JSON string containing a [`JWK`].
   ///
   pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
     let key: JWK = serde_json::from_str(key_json)
@@ -675,9 +675,9 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `pem` - PEM encoded public RSA key
-  /// `kid` - optional key id
-  /// `alg` - algorithm
+  /// * `pem` - PEM encoded public RSA key
+  /// * `kid` - optional key id
+  /// * `alg` - algorithm, e.g. [`KeyAlgorithm::RS256`]
   ///
   pub fn add_rsa_pem_key(&self, pem: &str, kid: Option<&str>, alg: KeyAlgorithm) -> BBResult<()> {
     let rsa = openssl::rsa::Rsa::public_key_from_pem(pem.as_bytes()).map_err(
@@ -708,9 +708,9 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `pem` - public key in PEM encoding
-  /// `kid` - optional key id
-  /// `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
+  /// * `pem` - public key in PEM encoding
+  /// * `kid` - optional key id
+  /// * `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
   ///
   pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
 
@@ -742,7 +742,7 @@ impl KeyStore {
   /// [here](https://openid.net/specs/openid-connect-core-1_0.html#SigEnc).
   ///
   /// # Arguments
-  /// `kid` - the ID of the key. If None, the first key is returned.
+  /// * `kid` - the ID of the key. If None, the first key is returned.
   ///
   pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<BBKey> {
 
@@ -797,7 +797,7 @@ impl KeyStore {
   ///
   /// # Returns
   ///
-  /// Tine of initial load or None if the keys were never loaded.
+  /// Time of initial load or None if the keys were never loaded.
   ///
   pub fn load_time(&self) -> Option<SystemTime> {
     self.load_time
@@ -899,7 +899,7 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `response` - response to read the cache-control HTTP header from
+  /// * `response` - response to read the cache-control HTTP header from
   ///
   fn get_key_expiration_time(response: &mut reqwest::Response) -> Result<u64, ()> {
     let header = response.headers().get("cache-control").ok_or(())?;
@@ -922,7 +922,7 @@ impl KeyStore {
   /// `https://host.tld/realms/<realm_name>/.well-known/openid-configuration`
   ///
   /// # Arguments
-  /// `idp_discovery_url` - the URL to load the discovery info from.
+  /// * `idp_discovery_url` - the URL to load the discovery info from.
   ///
   ///
   pub async fn idp_certs_url(idp_discovery_url: &str) -> BBResult<String> {
@@ -957,8 +957,8 @@ impl KeyStore {
   ///
   /// # Arguments
   ///
-  /// `host` - protocol and host name of the Keycloak server, e.g. <https://idp.domain.tld>
-  /// `realm` - the realm name
+  /// * `host` - protocol and host name of the Keycloak server, e.g. <https://idp.domain.tld>
+  /// * `realm` - the realm name
   ///
   /// # Returns
   ///
@@ -998,8 +998,8 @@ impl KeyStore {
 /// this function returns 45678.
 ///
 /// # Arguments
-/// `hdr_value` - the header value (or string) to search for an assigned value
-/// `name` - the name to look for before the assignment '='
+/// * `hdr_value` - the header value (or string) to search for an assigned value
+/// * `name` - the name to look for before the assignment '='
 ///
 fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
   /* search name */
@@ -1060,7 +1060,7 @@ mod tests {
   ///
   /// # Arguments
   ///
-  /// `asset_name` - path and file name of the file, relative to the "assets" folder.
+  /// * `asset_name` - path and file name of the file, relative to the "assets" folder.
   ///
   /// # Returns
   ///
