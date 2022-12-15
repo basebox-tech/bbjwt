@@ -100,7 +100,7 @@ pub enum KeyType {
 /// A list of values allowed in a JOSE header is here:
 /// <https://www.rfc-editor.org/rfc/rfc7518#section-3.1>
 ///
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum KeyAlgorithm {
   /// RSASSA-PKCS-v1_5 using SHA-256 hash algorithm (recommended).
   RS256,
@@ -116,6 +116,8 @@ pub enum KeyAlgorithm {
   ES512,
   /// Edwards Curve DSA
   EdDSA,
+  /// Other algorithms are not supported; this include "none", which turns off validation.
+  /// This is a security issue, see (here)[https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1)
   #[serde(other)]
   Other,
 }

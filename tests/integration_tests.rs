@@ -35,6 +35,33 @@ fn load_asset(name: &str) -> String {
 }
 
 ///
+/// Validate unsupported algorithm; must panic.
+///
+#[tokio::test]
+#[should_panic(expected="Unsupported alg")]
+async fn unsupported_alg_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_rsa_pem_key(
+    &load_asset("rsa.pub.key"),
+    Some("key-1"),
+    KeyAlgorithm::RS256)
+    .expect("Failed to add RSA key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_unsupported_alg.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+    .await
+    .unwrap();
+}
+
+
+///
 /// Validate valid RSA256 JWT.
 ///
 #[tokio::test]
@@ -394,4 +421,3 @@ async fn ed25519_valid_jwt() {
   .await
   .expect("Valid Ed25519 JWT did not validate");
 }
-

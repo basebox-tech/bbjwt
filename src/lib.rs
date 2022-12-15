@@ -225,7 +225,6 @@ pub struct JWTClaims {
 /// I have no idea if `jku` and/or `jwk` fields are actually being used...
 ///
 #[derive(Deserialize)]
-#[allow(dead_code)]
 struct JOSEHeader {
   /// Algorithm
   alg: KeyAlgorithm,
@@ -329,6 +328,11 @@ pub async fn validate_jwt(jwt: &str,
   let hdr_json = base64::decode_config(parts[0], base64_config())?;
   let kid_hdr: JOSEHeader = serde_json::from_slice(&hdr_json)
     .map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
+
+  /* Deny JWTs with no algorithm; see [here](https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1) */
+  if kid_hdr.alg == KeyAlgorithm::Other {
+    return Err(BBError::TokenInvalid("Unsupported algorithm".to_string()));
+  }
 
   /* get public key for signature validation */
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
