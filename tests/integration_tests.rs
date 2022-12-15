@@ -217,7 +217,7 @@ async fn es256_valid_jwt() {
 
   let ks = KeyStore::new().await.unwrap();
   ks.add_ec_pem_key(
-    &load_asset("ec.pub.key"),
+    &load_asset("ec256.pub.key"),
     Some("key-1"),
     EcCurve::P256)
     .expect("Failed to add EC key");
@@ -232,5 +232,135 @@ async fn es256_valid_jwt() {
   )
   .await
   .expect("Valid JWT did not validate");
+}
+
+
+///
+/// Validate expired ES256 JWT; must panic
+///
+#[tokio::test]
+#[should_panic(expected = "expired")]
+async fn es256_expired_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ec_pem_key(
+    &load_asset("ec256.pub.key"),
+    Some("key-1"),
+    EcCurve::P256)
+    .expect("Failed to add EC key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_es256_expired.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+  .await
+  .unwrap();
+}
+
+///
+/// Validate expired ES256 JWT; must panic
+///
+#[tokio::test]
+#[should_panic(expected = "SignatureInvalid")]
+async fn es256_signature_invalid_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ec_pem_key(
+    &load_asset("ec256.pub.key"),
+    Some("key-1"),
+    EcCurve::P256)
+    .expect("Failed to add EC key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_es256_signature_invalid.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+  .await
+  .unwrap();
+}
+
+
+///
+/// Validate ES384
+///
+#[tokio::test]
+async fn es384_valid_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ec_pem_key(
+    &load_asset("ec384.pub.key"),
+    Some("key-1"),
+    EcCurve::P384)
+    .expect("Failed to add EC key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_es384.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+  .await
+  .expect("Valid ES384 JWT did not validate");
+}
+
+///
+/// Validate ES384 with wrong ISS; must panic
+///
+#[tokio::test]
+#[should_panic(expected = "iss")]
+async fn es384_iss_wrong() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ec_pem_key(
+    &load_asset("ec384.pub.key"),
+    Some("key-1"),
+    EcCurve::P384)
+    .expect("Failed to add EC key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_es384.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations("wrong_iss", None, None),
+    &ks
+  )
+  .await
+  .unwrap();
+}
+
+///
+/// Validate ES512
+///
+#[tokio::test]
+async fn es512_valid_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ec_pem_key(
+    &load_asset("ec384.pub.key"),
+    Some("key-1"),
+    EcCurve::P521)
+    .expect("Failed to add EC key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_es512.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+  .await
+  .expect("Valid ES512 JWT did not validate");
 }
 
