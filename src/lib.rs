@@ -24,6 +24,19 @@
 //! * Asynchronous
 //! * Thread safe
 //!
+//! ## Algorithm Support
+//!
+//! bbjwt supports the following signing algorithms:
+//!
+//! * RSA256
+//! * RSA384
+//! * RSA512
+//! * ES256
+//! * ES384
+//! * ES512
+//!
+//! Encrypted JWTs are not supported for now.
+//!
 //! ## Building
 //!
 //! bbjwt uses the openssl crate, so OpenSSL development libraries are required to build bbjwt. See
