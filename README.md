@@ -17,7 +17,7 @@ And that's it.
 
 Besides, we designed bbjwt to meet the following requirements:
 
-* No unsecure code
+* No unsecure code (openssl crate is not considered unsecure by us :-) )
 * Never panic
 * No lifetime specifiers in the API
 * Asynchronous
@@ -25,17 +25,23 @@ Besides, we designed bbjwt to meet the following requirements:
 
 ## Algorithm Support
 
-bbjwt supports the following signing algorithms:
+The following table shows all signing algorithms supported by bbjwt, along with some info about
+their usage in JWKs, JWTs etc.
 
-* RSA256
-* RSA384
-* RSA512
-* ES256
-* ES384
-* ES512
-* Ed25519
+| Name    | JOSE "kty" | JOSE "alg" | JOSE "curve"      |
+| ------- | ---------- | ---------- | ----------------- |
+| RSA256  | RSA        | RS256      |                   |
+| RSA384  | RSA        | RS384      |                   |
+| RSA512  | RSA        | RS512      |                   |
+| ES256   | EC         | ES256      | P-256             |
+| ES384   | EC         | ES384      | P-384             |
+| ES512   | EC         | ES512      | P-521 *(no typo)* |
+| Ed25519 | OKP or oct | EdDSA      | Ed25519           |
+| Ed448   | OKP or oct | EdDSA      | Ed448             |
 
 Encrypted JWTs are not supported.
+
+BTW, if you have the choice, use Ed25519. It is safe and fast.
 
 ## Building
 
@@ -57,7 +63,7 @@ a local buffer/file.
 
 See the following example:
 
-```rust
+```rust, no_run
 use bbjwt::KeyStore;
 
 #[tokio::main]
@@ -86,17 +92,21 @@ async fn main() {
 
 ### Using public keys from memory
 
-This example loads the keys from a local buffer.
+When loading public keys from local file or buffer, you can either load a JWK JSON or a PEM encoded 
+text. JWKs contain all required info to identify the type of key, but for PEM you need to use
+the function that corresponds to the type of key.
 
-```rust
-use bbjwt::KeyStore;
+See the following example:
+
+```rust, no_run
+use bbjwt::{KeyStore, KeyAlgorithm, EcCurve};
 
 #[tokio::main]
 async fn main() {
   // Create an empty keystore
   let mut keystore = KeyStore::new().await.unwrap();
 
-  // Read public keys from a buffer; this must be a JWK in JSON syntax; for example
+  // Load public key from a JWK JSON; see
   // https://openid.net/specs/draft-jones-json-web-key-03.html#ExampleJWK
   let json_key = r#"
   {
@@ -107,6 +117,30 @@ async fn main() {
   // Add the key
   keystore.add_key(json_key);
 
+  let pem_key = r#"-----BEGIN PUBLIC KEY-----
+..."#;
+
+  // Load a RSA key from a PEM buffer
+  keystore.add_rsa_pem_key(
+    pem_key,
+    Some("key-rsa"),
+    KeyAlgorithm::RS256
+  ).unwrap();
+
+  // Load a EC key from a PEM buffer
+  keystore.add_ec_pem_key(
+    pem_key,
+    Some("key-ec"),
+    EcCurve::P256
+  ).unwrap();
+
+  // Load EdDSA key from a PEM buffer
+  keystore.add_ec_pem_key(
+    pem_key,
+    Some("key-ed"),
+    EcCurve::Ed25519
+  ).unwrap();
+
   // You can add more keys; in this case, the keys should have an ID and the JWT to be
   // validated should have a "kid" claim. Otherwise, bbjwt uses the first key in the set.
 }
@@ -116,7 +150,7 @@ async fn main() {
 
 JWTs are passed as Base64 encoded strings; for details about this format, see e.g. <https://jwt.io>.
 
-```rust
+```rust, no_run
 use bbjwt::{KeyStore, default_validations, validate_jwt};
 
 #[tokio::main]

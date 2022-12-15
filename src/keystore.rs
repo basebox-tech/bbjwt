@@ -117,7 +117,7 @@ pub enum KeyAlgorithm {
   /// Edwards Curve DSA
   EdDSA,
   /// Other algorithms are not supported; this include "none", which turns off validation.
-  /// This is a security issue, see (here)[https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1)
+  /// This is a security issue, see [here](https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1)
   #[serde(other)]
   Other,
 }
@@ -702,45 +702,17 @@ impl KeyStore {
   }
 
   ///
-  /// Add a public EC key from a PEM string.
+  /// Add a public elliptic curve key from a PEM string.
   ///
-  /// # Arguments
-  ///
-  /// `pem` - PEM encoded public EC key
-  /// `kid` - optional key id
-  ///
-  pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
-    let ec_key = EcKey::public_key_from_pem(pem.as_bytes()).map_err(
-      |e| BBError::Other(format!("Could not read RSA pem: {:?}", e))
-    )?;
-
-    let bbkey = BBKey {
-      kid: kid.map(|v| v.to_string()),
-      key: PKey::from_ec_key(ec_key)
-        .map_err(
-          |e| BBError::JWKInvalid(format!("Failed to create PKey/EC from PEM: {}", e))
-        )?,
-        kty: KeyType::EC,
-        alg: curve.algorithm(),
-        crv: Some(curve),
-      };
-
-    let mut keyset = self.keyset.write()
-      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
-    keyset.push(bbkey);
-    Ok(())
-  }
-
-  ///
-  /// Add a public Ed25519 or Ed448 key from a PEM string.
+  /// Supports both EdDSA and EC keys.
   ///
   /// # Arguments
   ///
   /// `pem` - public key in PEM encoding
   /// `kid` - optional key id
-  /// `curve` - the Ed curve (Ed448 or Ed25519)
+  /// `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
   ///
-  pub fn add_ed_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
+  pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
 
     let key = PKey::public_key_from_pem(pem.as_bytes()).map_err(
       |e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e))

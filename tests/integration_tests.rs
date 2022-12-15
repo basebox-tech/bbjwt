@@ -34,6 +34,38 @@ fn load_asset(name: &str) -> String {
   data
 }
 
+
+///
+/// Validate a JWT with a correct and a wrong key. Naturally, the latter must fail.
+///
+async fn validate_jwt_with_keystores(jwt_name: &str, keystore_good: &KeyStore, keystore_bad: &KeyStore) {
+
+  let jwt = load_asset(jwt_name);
+
+  let jwt_decoded = validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    keystore_good
+  )
+  .await
+  .expect("Valid JWT did not validate");
+
+  /* check some claims */
+  assert_eq!(jwt_decoded.claims["nonce"].as_str().unwrap(), "UZ1BSZFvy7jKkj1o9p3r7w");
+  assert_eq!(jwt_decoded.claims["sub"].as_str().unwrap(), "13529346-91b6-4268-aae1-f5ad8f44cf4d");
+  assert_eq!(jwt_decoded.claims["iss"].as_str().unwrap(), "https://kc.basebox.health/realms/testing");
+
+  /* wrong keystore: must fail */
+  let ret = validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    keystore_bad
+  )
+  .await;
+  let err_msg = ret.unwrap_err().to_string();
+  assert!(err_msg.contains("Invalid signature"), "Invalid key check did not fail with signature error.");
+}
+
 ///
 /// Validate unsupported algorithm; must panic.
 ///
@@ -67,64 +99,21 @@ async fn unsupported_alg_jwt() {
 #[tokio::test]
 async fn rsa256_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_rsa_pem_key(
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_rsa_pem_key(
     &load_asset("rsa.pub.key"),
     Some("key-1"),
     KeyAlgorithm::RS256)
-    .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+    .expect("Failed to add RSA384 key");
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_rsa256.txt");
-  let jwt_decoded = validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid JWT did not validate");
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_rsa_pem_key(
+      &load_asset("rsa.wrong.pub.key"),
+      Some("key-1"),
+      KeyAlgorithm::RS256)
+      .expect("Failed to add RSA384 key");
 
-  /* check some claims */
-  assert_eq!(jwt_decoded.claims["nonce"].as_str().unwrap(), "UZ1BSZFvy7jKkj1o9p3r7w");
-  assert_eq!(jwt_decoded.claims["sub"].as_str().unwrap(), "13529346-91b6-4268-aae1-f5ad8f44cf4d");
-  assert_eq!(jwt_decoded.claims["iss"].as_str().unwrap(), "https://kc.basebox.health/realms/testing");
-}
-
-
-///
-/// Validate RSA256 JWT with wrong key, must panic.
-///
-#[tokio::test]
-#[should_panic(expected = "SignatureInvalid")]
-async fn rsa256_invalid_key() {
-  let wrong_key = "-----BEGIN PUBLIC KEY-----
-MIIBITANBgkqhkiG9w0BAQEFAAOCAQ4AMIIBCQKCAQBpqqxgRe8ugvp6+LsNMood
-VX7c+hb58VG23Q7pZMhhoMTU4fE/sgCCE361GuH4xbfkg2/nf2LiMD5qaq6L5U5I
-O4ycVtFTYSXMDHQVKB8BB8ZZpL7tx1S4kzaycClmDzSmTibIpNVdQmxNTrH2GHak
-jk9+z6rSusYbYPOd3MSP1SakWcN6wv2j1hNMPrp7SZ98ST0CTuRCx01e9fSW5jP9
-XJrW2WwcQAk9XkTDG0/hZ6Owxt4lMaXfXvVflvSeWhR/ucuZd5HomvI+taxg1OvA
-MN6hu6FOYmhMPDLa9pv4MacbIxAnYyHcKnQPC6xvIWcEemZm9uZDEtqk7QigKd7r
-AgMBAAE=
------END PUBLIC KEY-----";
-
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_rsa_pem_key(
-    wrong_key,
-    Some("key-1"),
-    KeyAlgorithm::RS256)
-    .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
-
-  /* verify valid token */
-  let jwt = load_asset("id_token_rsa256.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid JWT did not validate");
+  validate_jwt_with_keystores("id_token_rsa256.txt", &ks_good, &ks_bad).await;
 }
 
 
@@ -196,23 +185,22 @@ async fn rsa256_valid_claims_expired_jwt() {
 #[tokio::test]
 async fn rsa384_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_rsa_pem_key(
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_rsa_pem_key(
     &load_asset("rsa.pub.key"),
     Some("key-1"),
     KeyAlgorithm::RS384)
-    .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+    .expect("Failed to add RSA384 key");
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_rsa384.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid JWT did not validate");
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_rsa_pem_key(
+      &load_asset("rsa.wrong.pub.key"),
+      Some("key-1"),
+      KeyAlgorithm::RS384)
+      .expect("Failed to add RSA384 key");
+
+  validate_jwt_with_keystores("id_token_rsa384.txt", &ks_good, &ks_bad).await;
+
 }
 
 ///
@@ -247,23 +235,21 @@ async fn rsa512_valid_jwt() {
 #[tokio::test]
 async fn es256_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_ec_pem_key(
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_ec_pem_key(
     &load_asset("ec256.pub.key"),
     Some("key-1"),
     EcCurve::P256)
-    .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
+    .expect("Failed to add ec256 key");
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_es256.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid JWT did not validate");
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_ec_pem_key(
+      &load_asset("ec256.wrong.pub.key"),
+      Some("key-1"),
+      EcCurve::P256)
+      .expect("Failed to add EC256 key");
+
+  validate_jwt_with_keystores("id_token_es256.txt", &ks_good, &ks_bad).await;
 }
 
 
@@ -326,49 +312,22 @@ async fn es256_signature_invalid_jwt() {
 #[tokio::test]
 async fn es384_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_ec_pem_key(
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_ec_pem_key(
     &load_asset("ec384.pub.key"),
     Some("key-1"),
     EcCurve::P384)
-    .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
+    .expect("Failed to add ec384 key");
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_es384.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid ES384 JWT did not validate");
-}
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_ec_pem_key(
+      &load_asset("ec384.wrong.pub.key"),
+      Some("key-1"),
+      EcCurve::P384)
+      .expect("Failed to add EC384 key");
 
-///
-/// Validate ES384 with wrong ISS; must panic
-///
-#[tokio::test]
-#[should_panic(expected = "iss")]
-async fn es384_iss_wrong() {
+  validate_jwt_with_keystores("id_token_es384.txt", &ks_good, &ks_bad).await;
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_ec_pem_key(
-    &load_asset("ec384.pub.key"),
-    Some("key-1"),
-    EcCurve::P384)
-    .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
-
-  /* verify valid token */
-  let jwt = load_asset("id_token_es384.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations("wrong_iss", None, None),
-    &ks
-  )
-  .await
-  .unwrap();
 }
 
 ///
@@ -377,23 +336,22 @@ async fn es384_iss_wrong() {
 #[tokio::test]
 async fn es512_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_ec_pem_key(
-    &load_asset("ec384.pub.key"),
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_ec_pem_key(
+    &load_asset("ec512.pub.key"),
     Some("key-1"),
     EcCurve::P521)
-    .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
+    .expect("Failed to add ec512 key");
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_es512.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid ES512 JWT did not validate");
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_ec_pem_key(
+      &load_asset("ec512.wrong.pub.key"),
+      Some("key-1"),
+      EcCurve::P521)
+      .expect("Failed to add EC512 key");
+
+  validate_jwt_with_keystores("id_token_es512.txt", &ks_good, &ks_bad).await;
+
 }
 
 
@@ -403,21 +361,43 @@ async fn es512_valid_jwt() {
 #[tokio::test]
 async fn ed25519_valid_jwt() {
 
-  let ks = KeyStore::new().await.unwrap();
-  ks.add_ed_key(
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_ec_pem_key(
     &load_asset("ed25519.pub.key"),
     Some("key-1"),
     EcCurve::Ed25519)
     .expect("Failed to add Ed25519 key");
-  assert_eq!(ks.keys_len(), 1);
 
-  /* verify valid token */
-  let jwt = load_asset("id_token_ed25519.txt");
-  validate_jwt(
-    &jwt,
-    &default_validations(ISS, None, None),
-    &ks
-  )
-  .await
-  .expect("Valid Ed25519 JWT did not validate");
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_ec_pem_key(
+      &load_asset("ed25519.wrong.pub.key"),
+      Some("key-1"),
+      EcCurve::Ed25519)
+      .expect("Failed to add Ed448 key");
+
+  validate_jwt_with_keystores("id_token_ed25519.txt", &ks_good, &ks_bad).await;
+}
+
+
+///
+/// Validate Ed448
+///
+#[tokio::test]
+async fn ed448_valid_jwt() {
+
+  let ks_good = KeyStore::new().await.unwrap();
+  ks_good.add_ec_pem_key(
+    &load_asset("ed448.pub.key"),
+    Some("key-1"),
+    EcCurve::Ed448)
+    .expect("Failed to add Ed448 key");
+
+  let ks_bad = KeyStore::new().await.unwrap();
+    ks_bad.add_ec_pem_key(
+      &load_asset("ed448.wrong.pub.key"),
+      Some("key-1"),
+      EcCurve::Ed448)
+      .expect("Failed to add Ed448 key");
+
+  validate_jwt_with_keystores("id_token_ed448.txt", &ks_good, &ks_bad).await;
 }
