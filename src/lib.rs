@@ -132,9 +132,9 @@ struct ValidationClaims {
 ///
 /// # Arguments
 ///
-/// `issuer` - the contents the "iss" claim must have
-/// `audience` - if Some, the value the "aud" claim must have
-/// `nonce` - if Some, the value the "nonce" claim must have
+/// * `issuer` - the contents the "iss" claim must have
+/// * `audience` - if Some, the value the "aud" claim must have
+/// * `nonce` - if Some, the value the "nonce" claim must have
 ///
 /// # Returns
 ///
@@ -239,8 +239,8 @@ pub async fn validate_jwt(jwt: &str,
 ///
 /// # Arguments
 ///
-/// `claims` - claims extracted from the JWT
-/// `step` - the validation step to perform
+/// * `claims` - claims extracted from the JWT
+/// * `step` - the validation step to perform
 ///
 /// # Returns
 ///
@@ -324,8 +324,8 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
 ///
 /// # Arguments
 ///
-/// jwt_parts: JWT split by '.'; must be a vector of 3 strings
-/// verifier: The OpenSSL verifier to use
+/// * `jwt_parts` - JWT split by '.'; must be a vector of 3 strings
+/// * `verifier` - The OpenSSL verifier to use
 ///
 fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
 

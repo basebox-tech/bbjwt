@@ -656,6 +656,7 @@ impl KeyStore {
   /// Manually add a key to the keystore.
   ///
   /// # Arguments
+  ///
   /// * `key_json` - JSON string containing a [`JWK`].
   ///
   pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
@@ -924,7 +925,6 @@ impl KeyStore {
   /// # Arguments
   /// * `idp_discovery_url` - the URL to load the discovery info from.
   ///
-  ///
   pub async fn idp_certs_url(idp_discovery_url: &str) -> BBResult<String> {
     let info_json = reqwest::get(idp_discovery_url)
       .await
@@ -998,6 +998,7 @@ impl KeyStore {
 /// this function returns 45678.
 ///
 /// # Arguments
+///
 /// * `hdr_value` - the header value (or string) to search for an assigned value
 /// * `name` - the name to look for before the assignment '='
 ///

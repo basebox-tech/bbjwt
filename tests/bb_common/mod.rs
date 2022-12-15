@@ -84,8 +84,10 @@ fn _init_log() {
 
 ///
 ///  Initialize logging in a test function.
+///
 /// # Arguments
-/// - test_id: name/id of the current test.
+///
+/// * `test_id` - name/id of the current test.
 ///
 pub fn init_log(test_id: &'static str) {
   INIT_LOG.call_once(_init_log);
@@ -97,7 +99,7 @@ pub fn init_log(test_id: &'static str) {
 ///
 /// # Arguments
 ///
-/// `asset_name` - path and file name of the file, relative to the "assets" folder.
+/// * `asset_name` - path and file name of the file, relative to the "assets" folder.
 ///
 /// # Returns
 ///
