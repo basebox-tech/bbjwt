@@ -50,13 +50,18 @@ async fn rsa256_valid_jwt() {
 
   /* verify valid token */
   let jwt = load_asset("id_token_rsa256.txt");
-  validate_jwt(
+  let jwt_decoded = validate_jwt(
     &jwt,
     &default_validations(ISS, None, None),
     &ks
   )
   .await
   .expect("Valid JWT did not validate");
+
+  /* check some claims */
+  assert_eq!(jwt_decoded.claims["nonce"].as_str().unwrap(), "UZ1BSZFvy7jKkj1o9p3r7w");
+  assert_eq!(jwt_decoded.claims["sub"].as_str().unwrap(), "13529346-91b6-4268-aae1-f5ad8f44cf4d");
+  assert_eq!(jwt_decoded.claims["iss"].as_str().unwrap(), "https://kc.basebox.health/realms/testing");
 }
 
 

@@ -183,13 +183,14 @@ pub enum ValidationStep {
 /// and the caller knows best what fields to expect, so this struct simply contains a copy of the parsed
 /// JSON fields.
 ///
+#[allow(dead_code)]
 pub struct JWTClaims {
   /// JOSE header fields of the JWTs, see [RFC7519](https://www.rfc-editor.org/rfc/rfc7519#section-5)
-  headers: serde_json::Value,
+  pub headers: serde_json::Value,
   /// Claims (fields) found in the JWT. What fields are present depends on the purpose of
   /// the JWT. For OpenID Connect ID tokens see
   /// [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken)
-  claims: serde_json::Value,
+  pub claims: serde_json::Value,
 }
 
 

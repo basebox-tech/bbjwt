@@ -56,6 +56,8 @@ pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 ///
 /// This is basically an OpenSSL [`PKey<Public>`] with required fields from the original JWK.
 ///
+///
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BBKey {
   /// OpenSSL public key
@@ -1027,9 +1029,6 @@ mod tests {
   use std::fs::File;
   use std::io::Read;
 
-
-  /// Seconds since UNIX_EPOCH in the very far future (~1000 years)
-  const NEVER_SECONDS: u64 = 33206263475;
 
   ///
   /// Utility function that returns the absolute path and file name to a file in the /tests/assets folder.
