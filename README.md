@@ -63,7 +63,7 @@ a local buffer/file.
 
 See the following example:
 
-```rust, no_run
+```rust  no_run
 use bbjwt::KeyStore;
 
 #[tokio::main]
@@ -98,7 +98,7 @@ the function that corresponds to the type of key.
 
 See the following example:
 
-```rust, no_run
+```rust no_run
 use bbjwt::{KeyStore, KeyAlgorithm, EcCurve};
 
 #[tokio::main]
@@ -150,7 +150,7 @@ async fn main() {
 
 JWTs are passed as Base64 encoded strings; for details about this format, see e.g. <https://jwt.io>.
 
-```rust, no_run
+```rust no_run
 use bbjwt::{KeyStore, default_validations, validate_jwt};
 
 #[tokio::main]
