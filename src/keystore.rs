@@ -348,8 +348,8 @@ impl BBKey {
         )?;
 
         /* calculate signature from payload */
-        let digest = self.alg.message_digest().ok_or(
-          BBError::Other("Unknown algorithm digest".to_string())
+        let digest = self.alg.message_digest().ok_or_else(
+          || BBError::Other("Unknown algorithm digest".to_string())
         )?;
         let hash = hash(digest, payload).map_err(
           |e| BBError::Other(format!("Failed to hash payload: {}", e))
@@ -545,7 +545,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
     key,
     kty: jwk.kty.clone(),
     crv: jwk.crv.clone(),
-    alg: jwk.alg.clone().unwrap_or(KeyAlgorithm::default()),
+    alg: jwk.alg.clone().unwrap_or_else(KeyAlgorithm::default),
   })
 
 }
@@ -670,7 +670,7 @@ impl KeyStore {
         )?,
         kty: KeyType::RSA,
         crv: None,
-        alg: alg,
+        alg,
       };
 
     let mut keyset = self.keyset.write()
