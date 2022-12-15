@@ -5,6 +5,10 @@ edition = "2021"
 authors = [
   "Markus Thielen <markus.thielen@basebox.tech>",
 ]
+keywords = [
+  "jose", "jwt", "OpenID Connect", "crypto"
+]
+description = "A simple to use, well documented JWT validation library, mainly for validating OpenID Connect ID Tokens."
 
 [dependencies]
 url = { version = "2.1" }

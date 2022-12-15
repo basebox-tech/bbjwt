@@ -1,9 +1,8 @@
 //!
-//! Keystore implementation for bbjwt.
+//! Keystore and key handling for bbjwt.
 //!
-//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS).
-//! It is named *keystore* since on top of JWKS functionality it also provides loading keys
-//! from a URL.
+//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS) as well as
+//! OpenSSL related functionality, e.g. converting JWKs into something OpenSSL can work with.
 //!
 //! Keys might have an expiration time; while this implementation supports updating
 //! expired keys by reloading them from the original URL, it does not provide cron-like
@@ -24,7 +23,7 @@ use std::time::{Duration, SystemTime};
 use crate::errors::*;
 use openssl::ecdsa::EcdsaSig;
 use url::Url;
-use std::fmt;
+use std::fmt::{self};
 
 extern crate openssl;
 extern crate serde;
@@ -39,6 +38,7 @@ use openssl::nid::Nid;
 use openssl::rsa::Rsa;
 use openssl::pkey::Id;
 use openssl::hash::{hash, MessageDigest};
+
 
 
 /* --- constants -------------------------------------------------------------------------------- */
@@ -75,13 +75,19 @@ pub struct BBKey {
 ///
 /// JWK key type enum
 ///
+/// * <https://www.rfc-editor.org/rfc/rfc7517#section-4.1>
+/// * <https://www.rfc-editor.org/rfc/rfc7518#page-28>
+///
 #[derive(Clone, Debug, Deserialize)]
+#[allow(non_camel_case_types)]
 pub enum KeyType {
   /// RSA
   RSA,
   /// Elliptic Curve
   EC,
-  /// Octet Key Pair
+  /// Octet Key Pair (Ed25519, Ed448), according to <https://www.rfc-editor.org/rfc/rfc7518#section-6.1>
+  oct,
+  /// Octet key pair according to [this doc](https://curity.io/resources/learn/jwt-signatures/)
   OKP,
   /// Other types are not supported
   #[serde(other)]
@@ -108,12 +114,16 @@ pub enum KeyAlgorithm {
   ES384,
   /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional).
   ES512,
+  /// Edwards Curve DSA
+  EdDSA,
   #[serde(other)]
   Other,
 }
 
 ///
-/// Elliptic Curves for EC and Ed/OKP keys
+/// Elliptic Curves for EC and Ed/oct keys
+///
+/// <https://www.rfc-editor.org/rfc/rfc7518#section-6.2.1.1>
 ///
 #[derive(Clone, Debug, Deserialize)]
 pub enum EcCurve {
@@ -280,7 +290,7 @@ impl EcCurve {
       EcCurve::P256 => KeyAlgorithm::ES256,
       EcCurve::P384 => KeyAlgorithm::ES384,
       EcCurve::P521 => KeyAlgorithm::ES512,
-      _ => KeyAlgorithm::Other
+      EcCurve::Ed25519 | EcCurve::Ed448 => KeyAlgorithm::EdDSA,
     }
   }
 }
@@ -360,6 +370,16 @@ impl BBKey {
         )?)
       },
 
+      KeyAlgorithm::EdDSA => {
+        let mut verifier = Verifier::new_without_digest(&self.key).map_err(
+          |e| BBError::Other(format!("Cannot get verifier for EdDSA: {}", e))
+        )?;
+        Ok(verifier.verify_oneshot(signature, payload).map_err(
+          |e| BBError::Other(format!("Failed to verify EdDSA signature: {}", e))
+        )?)
+
+      },
+
       _ => {
         Err(BBError::Other(format!("Unsupported key algorithm for key '{}'", *self)))
       }
@@ -393,7 +413,7 @@ impl BBKey {
         return Err(BBError::Other("EC key has no verifier".to_string()));
       },
 
-      KeyType::OKP => {
+      KeyType::oct | KeyType::OKP => {
         /* Ed does not use a message digest */
         Verifier::new_without_digest(&self.key).map_err(
           |e| BBError::Other(
@@ -514,11 +534,11 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         )?
     },
 
-    KeyType::OKP => {
-      /* OKP is Ed25519 or Ed448. Names, names, lots of names.
+    KeyType::oct | KeyType::OKP => {
+      /* oct is Ed25519 or Ed448. Names, names, lots of names.
        * This public key type uses only the x coordinate on the elliptic curve */
       if jwk.x.is_none() {
-        return Err(BBError::JWKInvalid(format!("Missing x for Ed/OKP key '{kid}'")));
+        return Err(BBError::JWKInvalid(format!("Missing x for Ed/oct key '{kid}'")));
       }
       let bytes = base64::decode_config(jwk.x.as_ref().unwrap(), base64_config())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
@@ -527,7 +547,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         Some(EcCurve::Ed448) => Id::ED448,
         None => Id::ED25519,
         _ => {
-          return Err(BBError::JWKInvalid(format!("Invalid curve for Ed/OKP key {kid}")));
+          return Err(BBError::JWKInvalid(format!("Invalid curve for Ed/oct key {kid}")));
         }
       };
 
@@ -702,6 +722,45 @@ impl KeyStore {
         alg: curve.algorithm(),
         crv: Some(curve),
       };
+
+    let mut keyset = self.keyset.write()
+      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    keyset.push(bbkey);
+    Ok(())
+  }
+
+  ///
+  /// Add a public Ed25519 or Ed448 key from raw bytes.
+  ///
+  /// # Arguments
+  ///
+  /// `pem` - public key in PEM encoding
+  /// `kid` - optional key id
+  /// `curve` - the Ed curve (Ed448 or Ed25519)
+  ///
+  pub fn add_ed_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
+
+    let key = PKey::public_key_from_pem(pem.as_bytes()).map_err(
+      |e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e))
+    )?;
+
+    // let key = match curve {
+    //   EcCurve::Ed25519 => PKey::public_key_from_raw_bytes(&pemkey.raw_public_key().unwrap(), openssl::pkey::Id::ED25519),
+    //   EcCurve::Ed448 => PKey::public_key_from_raw_bytes(&pemkey.raw_public_key().unwrap(), openssl::pkey::Id::ED448),
+    //   _ => {
+    //     return Err(BBError::Other("Invalid curve for EdDSA pub key".to_string()));
+    //   }
+    // }.map_err(|e| {
+    //   BBError::Other(format!("Failed to create EdDSA pub key: {}", e))
+    // })?;
+
+    let bbkey = BBKey {
+      kid: kid.map(|v| v.to_string()),
+      key,
+      kty: KeyType::OKP,
+      alg: curve.algorithm(),
+      crv: Some(curve),
+    };
 
     let mut keyset = self.keyset.write()
       .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;

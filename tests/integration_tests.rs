@@ -369,3 +369,29 @@ async fn es512_valid_jwt() {
   .expect("Valid ES512 JWT did not validate");
 }
 
+
+///
+/// Validate Ed25519
+///
+#[tokio::test]
+async fn ed25519_valid_jwt() {
+
+  let ks = KeyStore::new().await.unwrap();
+  ks.add_ed_key(
+    &load_asset("ed25519.pub.key"),
+    Some("key-1"),
+    EcCurve::Ed25519)
+    .expect("Failed to add Ed25519 key");
+  assert_eq!(ks.keys_len(), 1);
+
+  /* verify valid token */
+  let jwt = load_asset("id_token_ed25519.txt");
+  validate_jwt(
+    &jwt,
+    &default_validations(ISS, None, None),
+    &ks
+  )
+  .await
+  .expect("Valid Ed25519 JWT did not validate");
+}
+
