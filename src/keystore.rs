@@ -85,8 +85,6 @@ pub enum KeyType {
   RSA,
   /// Elliptic Curve
   EC,
-  /// Octet Key Pair (Ed25519, Ed448), according to <https://www.rfc-editor.org/rfc/rfc7518#section-6.1>
-  oct,
   /// Octet key pair according to [this doc](https://curity.io/resources/learn/jwt-signatures/)
   OKP,
   /// Other types are not supported
@@ -123,7 +121,7 @@ pub enum KeyAlgorithm {
 }
 
 ///
-/// Elliptic Curves for EC and Ed/oct keys
+/// Elliptic Curves for EC and Ed/OKP keys
 ///
 /// <https://www.rfc-editor.org/rfc/rfc7518#section-6.2.1.1>
 ///
@@ -415,7 +413,7 @@ impl BBKey {
         return Err(BBError::Other("EC key has no verifier".to_string()));
       },
 
-      KeyType::oct | KeyType::OKP => {
+      KeyType::OKP => {
         /* Ed does not use a message digest */
         Verifier::new_without_digest(&self.key).map_err(
           |e| BBError::Other(
@@ -536,11 +534,11 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         )?
     },
 
-    KeyType::oct | KeyType::OKP => {
-      /* oct is Ed25519 or Ed448. Names, names, lots of names.
+    KeyType::OKP => {
+      /* OKP is Ed25519 or Ed448. Names, names, lots of names.
        * This public key type uses only the x coordinate on the elliptic curve */
       if jwk.x.is_none() {
-        return Err(BBError::JWKInvalid(format!("Missing x for Ed/oct key '{kid}'")));
+        return Err(BBError::JWKInvalid(format!("Missing x for OKP key '{kid}'")));
       }
       let bytes = base64::decode_config(jwk.x.as_ref().unwrap(), base64_config())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
@@ -549,7 +547,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         Some(EcCurve::Ed448) => Id::ED448,
         None => Id::ED25519,
         _ => {
-          return Err(BBError::JWKInvalid(format!("Invalid curve for Ed/oct key {kid}")));
+          return Err(BBError::JWKInvalid(format!("Invalid curve for OKP key {kid}")));
         }
       };
 

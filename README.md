@@ -36,8 +36,8 @@ their usage in JWKs, JWTs etc.
 | ES256   | EC         | ES256      | P-256             |
 | ES384   | EC         | ES384      | P-384             |
 | ES512   | EC         | ES512      | P-521 *(no typo)* |
-| Ed25519 | OKP or oct | EdDSA      | Ed25519           |
-| Ed448   | OKP or oct | EdDSA      | Ed448             |
+| Ed25519 | OKP        | EdDSA      | Ed25519           |
+| Ed448   | OKP        | EdDSA      | Ed448             |
 
 Encrypted JWTs are not supported.
 
