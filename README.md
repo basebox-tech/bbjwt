@@ -34,6 +34,7 @@ their usage in JWKs, JWTs etc.
 | RSA384  | RSA        | RS384      |                   |
 | RSA512  | RSA        | RS512      |                   |
 | ES256   | EC         | ES256      | P-256             |
+| ES256   | EC         | ES256      | secp256k1         |
 | ES384   | EC         | ES384      | P-384             |
 | ES512   | EC         | ES512      | P-521 *(no typo)* |
 | Ed25519 | OKP        | EdDSA      | Ed25519           |
@@ -131,14 +132,16 @@ async fn main() {
   keystore.add_ec_pem_key(
     pem_key,
     Some("key-ec"),
-    EcCurve::P256
+    EcCurve::P256,
+    KeyAlgorithm::ES256
   ).unwrap();
 
   // Load EdDSA key from a PEM buffer
   keystore.add_ec_pem_key(
     pem_key,
     Some("key-ed"),
-    EcCurve::Ed25519
+    EcCurve::Ed25519,
+    KeyAlgorithm::EdDSA
   ).unwrap();
 
   // You can add more keys; in this case, the keys should have an ID and the JWT to be

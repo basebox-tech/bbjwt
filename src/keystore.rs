@@ -131,6 +131,8 @@ pub enum EcCurve {
   /// <https://www.javadoc.io/doc/com.nimbusds/nimbus-jose-jwt/6.0/com/nimbusds/jose/JWSAlgorithm.html#ES256>
   #[serde(rename = "P-256")]
   P256,
+  #[serde(rename="secp256k1")]
+  SECP256K1,
   #[serde(rename = "P-384")]
   P384,
   #[serde(rename = "P-521")]
@@ -275,24 +277,14 @@ impl EcCurve {
   ///
   pub fn nid(&self) -> Option<Nid> {
     match *self {
-      EcCurve::P256 => Some(Nid::SECP256K1),
+      EcCurve::SECP256K1 => Some(Nid::SECP256K1),
+      EcCurve::P256 => Some(Nid::X9_62_PRIME256V1),
       EcCurve::P384 => Some(Nid::SECP384R1),
       EcCurve::P521 => Some(Nid::SECP521R1),
       _ => None
     }
   }
 
-  ///
-  /// Return hashing algorithm used with this curve.
-  ///
-  pub fn algorithm(&self) -> KeyAlgorithm {
-    match *self {
-      EcCurve::P256 => KeyAlgorithm::ES256,
-      EcCurve::P384 => KeyAlgorithm::ES384,
-      EcCurve::P521 => KeyAlgorithm::ES512,
-      EcCurve::Ed25519 | EcCurve::Ed448 => KeyAlgorithm::EdDSA,
-    }
-  }
 }
 
 
@@ -710,18 +702,34 @@ impl KeyStore {
   /// * `pem` - public key in PEM encoding
   /// * `kid` - optional key id
   /// * `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
+  /// * `alg` - the algorithm, e.g. ES384
   ///
-  pub fn add_ec_pem_key(&self, pem: &str, kid: Option<&str>, curve: EcCurve) -> BBResult<()> {
+  pub fn add_ec_pem_key(
+    &self,
+    pem: &str,
+    kid: Option<&str>,
+    curve: EcCurve,
+    alg: KeyAlgorithm,
+  ) -> BBResult<()> {
 
     let key = PKey::public_key_from_pem(pem.as_bytes()).map_err(
       |e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e))
     )?;
 
+    /* determine key type */
+    let kty = match alg {
+      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => KeyType::EC,
+      KeyAlgorithm::EdDSA => KeyType::OKP,
+      _ => {
+        return Err(BBError::Other("Invalid algorithm for ec key".to_string()));
+      }
+    };
+
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
       key,
-      kty: KeyType::OKP,
-      alg: curve.algorithm(),
+      kty,
+      alg,
       crv: Some(curve),
     };
 

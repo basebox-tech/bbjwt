@@ -239,15 +239,17 @@ async fn es256_valid_jwt() {
   ks_good.add_ec_pem_key(
     &load_asset("ec256.pub.key"),
     Some("key-1"),
-    EcCurve::P256)
-    .expect("Failed to add ec256 key");
+    EcCurve::P256,
+    KeyAlgorithm::ES256
+  ).expect("Failed to add ec256 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
     ks_bad.add_ec_pem_key(
       &load_asset("ec256.wrong.pub.key"),
       Some("key-1"),
-      EcCurve::P256)
-      .expect("Failed to add EC256 key");
+      EcCurve::P256,
+      KeyAlgorithm::ES256
+    ).expect("Failed to add EC256 key");
 
   validate_jwt_with_keystores("id_token_es256.txt", &ks_good, &ks_bad).await;
 }
@@ -264,8 +266,9 @@ async fn es256_expired_jwt() {
   ks.add_ec_pem_key(
     &load_asset("ec256.pub.key"),
     Some("key-1"),
-    EcCurve::P256)
-    .expect("Failed to add EC key");
+    EcCurve::P256,
+    KeyAlgorithm::ES256
+  ).expect("Failed to add EC key");
   assert_eq!(ks.keys_len(), 1);
 
   /* verify valid token */
@@ -290,8 +293,9 @@ async fn es256_signature_invalid_jwt() {
   ks.add_ec_pem_key(
     &load_asset("ec256.pub.key"),
     Some("key-1"),
-    EcCurve::P256)
-    .expect("Failed to add EC key");
+    EcCurve::P256,
+    KeyAlgorithm::ES256
+  ).expect("Failed to add EC key");
   assert_eq!(ks.keys_len(), 1);
 
   /* verify valid token */
@@ -316,15 +320,17 @@ async fn es384_valid_jwt() {
   ks_good.add_ec_pem_key(
     &load_asset("ec384.pub.key"),
     Some("key-1"),
-    EcCurve::P384)
-    .expect("Failed to add ec384 key");
+    EcCurve::P384,
+    KeyAlgorithm::ES384
+  ).expect("Failed to add ec384 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
     ks_bad.add_ec_pem_key(
       &load_asset("ec384.wrong.pub.key"),
       Some("key-1"),
-      EcCurve::P384)
-      .expect("Failed to add EC384 key");
+      EcCurve::P384,
+      KeyAlgorithm::ES384
+    ).expect("Failed to add EC384 key");
 
   validate_jwt_with_keystores("id_token_es384.txt", &ks_good, &ks_bad).await;
 
@@ -340,15 +346,17 @@ async fn es512_valid_jwt() {
   ks_good.add_ec_pem_key(
     &load_asset("ec512.pub.key"),
     Some("key-1"),
-    EcCurve::P521)
-    .expect("Failed to add ec512 key");
+    EcCurve::P521,
+    KeyAlgorithm::ES512
+  ).expect("Failed to add ec512 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
     ks_bad.add_ec_pem_key(
       &load_asset("ec512.wrong.pub.key"),
       Some("key-1"),
-      EcCurve::P521)
-      .expect("Failed to add EC512 key");
+      EcCurve::P521,
+      KeyAlgorithm::ES512
+    ).expect("Failed to add EC512 key");
 
   validate_jwt_with_keystores("id_token_es512.txt", &ks_good, &ks_bad).await;
 
@@ -365,15 +373,17 @@ async fn ed25519_valid_jwt() {
   ks_good.add_ec_pem_key(
     &load_asset("ed25519.pub.key"),
     Some("key-1"),
-    EcCurve::Ed25519)
-    .expect("Failed to add Ed25519 key");
+    EcCurve::Ed25519,
+    KeyAlgorithm::EdDSA
+  ).expect("Failed to add Ed25519 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
     ks_bad.add_ec_pem_key(
       &load_asset("ed25519.wrong.pub.key"),
       Some("key-1"),
-      EcCurve::Ed25519)
-      .expect("Failed to add Ed448 key");
+      EcCurve::Ed25519,
+      KeyAlgorithm::EdDSA
+    ).expect("Failed to add Ed448 key");
 
   validate_jwt_with_keystores("id_token_ed25519.txt", &ks_good, &ks_bad).await;
 }
@@ -389,15 +399,57 @@ async fn ed448_valid_jwt() {
   ks_good.add_ec_pem_key(
     &load_asset("ed448.pub.key"),
     Some("key-1"),
-    EcCurve::Ed448)
-    .expect("Failed to add Ed448 key");
+    EcCurve::Ed448,
+    KeyAlgorithm::EdDSA
+  ).expect("Failed to add Ed448 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
     ks_bad.add_ec_pem_key(
       &load_asset("ed448.wrong.pub.key"),
       Some("key-1"),
-      EcCurve::Ed448)
-      .expect("Failed to add Ed448 key");
+      EcCurve::Ed448,
+      KeyAlgorithm::EdDSA
+    ).expect("Failed to add Ed448 key");
 
   validate_jwt_with_keystores("id_token_ed448.txt", &ks_good, &ks_bad).await;
 }
+
+///
+/// Test loading OKP/Ed25519 key from JWK JSON.
+///
+#[tokio::test]
+async fn load_ed25519_jwk() {
+  let mut ks = KeyStore::new().await.unwrap();
+  let jwk_json = load_asset("ed25519.pub.jwk.json");
+  ks.add_key(&jwk_json).unwrap();
+
+  assert_eq!(ks.keys_len(), 1);
+
+  /* get the key by name */
+  ks.key_by_id(Some("key-1")).unwrap();
+
+  /* get key with wrong name, must fail */
+  assert!(ks.key_by_id(Some("No-key-with-that-name")).is_err());
+
+}
+
+
+///
+/// Test loading elliptic curve key from JWK JSON.
+///
+#[tokio::test]
+async fn load_ec_jwk() {
+  let mut ks = KeyStore::new().await.unwrap();
+  let jwk_json = load_asset("ec256.pub.jwk.json");
+  ks.add_key(&jwk_json).unwrap();
+
+  assert_eq!(ks.keys_len(), 1);
+
+  /* get the key by name */
+  ks.key_by_id(Some("ec2561")).unwrap();
+
+  /* get key with wrong name, must fail */
+  assert!(ks.key_by_id(Some("No-key-with-that-name")).is_err());
+
+}
+
