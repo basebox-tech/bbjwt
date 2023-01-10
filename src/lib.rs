@@ -163,8 +163,8 @@ pub fn default_validations(issuer: &str,
 ///
 /// Validate a JWT.
 ///
-/// This function decodes the token string (base64), decrypts it (if applicable) and
-/// then validates it.
+/// This function decodes the token string (base64) and then validates it. Encrypted JWTs are
+/// not supported (yet?).
 ///
 /// # Arguments
 ///
