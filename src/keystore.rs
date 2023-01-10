@@ -233,13 +233,6 @@ impl KeyAlgorithm {
   }
 
   ///
-  /// Return default algorithm - should none be specified.
-  ///
-  pub fn default() -> Self {
-    KeyAlgorithm::RS256
-  }
-
-  ///
   /// Return signature length.
   ///
   /// Only applies to elliptic curve algorithms.
@@ -253,6 +246,19 @@ impl KeyAlgorithm {
     }
   }
 }
+
+impl Default for KeyAlgorithm {
+
+  ///
+  /// Return default algorithm - should none be specified.
+  ///
+  fn default() -> Self {
+    KeyAlgorithm::RS256
+  }
+
+}
+
+
 
 impl EcCurve {
 
@@ -557,7 +563,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
     key,
     kty: jwk.kty.clone(),
     crv: jwk.crv.clone(),
-    alg: jwk.alg.clone().unwrap_or_else(KeyAlgorithm::default),
+    alg: jwk.alg.clone().unwrap_or_default(),
   })
 
 }
