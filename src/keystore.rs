@@ -859,9 +859,17 @@ impl KeyStore {
   /// Clients should call this function when [`KeyStore::should_reload`] returns true.
   ///
   pub async fn load_keys(&mut self) -> BBResult<()> {
+
     let url = self.url
       .clone()
       .ok_or_else(|| BBError::Other("No load URL for keyset provided.".to_string()))?;
+
+    /* No keys are better than expired keys: clear keys first. */
+    let mut keys = self.keyset.write().map_err(
+      |e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e))
+    )?;
+    keys.clear();
+    drop(keys);
 
     let mut response = reqwest::get(&url)
       .await
@@ -885,8 +893,6 @@ impl KeyStore {
     let mut keys = self.keyset.write().map_err(
       |e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e))
     )?;
-
-    keys.clear();
 
     /* convert all keys to OpenSSL types */
     for key in keyset.keys {
