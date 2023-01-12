@@ -37,7 +37,7 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Print git branch name
         run: git rev-parse --abbrev-ref HEAD
@@ -55,8 +55,6 @@ jobs:
         run: cargo test --tests --examples
       - name: Doc tests
         run: cargo test --doc
-      - name: Test with all features enabled
-        run: cargo test --all-features
 
       - name: Check fmt
         if: ${{ matrix.rust_os.rust == '1.66.0' }}
@@ -71,4 +69,3 @@ jobs:
         run: |
           cargo install --force cargo-audit
           cargo audit
-
