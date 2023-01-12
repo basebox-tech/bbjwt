@@ -12,21 +12,19 @@
 #[macro_use]
 extern crate serde_derive;
 
+pub use errors::{BBError, BBResult};
 pub use keystore::KeyStore;
-pub use keystore::{KeyAlgorithm, EcCurve};
-pub use errors::{BBResult, BBError};
+pub use keystore::{EcCurve, KeyAlgorithm};
 
-use std::{time::{SystemTime, Duration, UNIX_EPOCH}};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use keystore::base64_config;
 use keystore::BBKey;
 
-
 /* --- mods ------------------------------------------------------------------------------------- */
 
-pub mod keystore;
 pub mod errors;
-
+pub mod keystore;
 
 /* --- types ------------------------------------------------------------------------------------ */
 
@@ -72,7 +70,6 @@ pub struct JWTClaims {
   /// [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken)
   pub claims: serde_json::Value,
 }
-
 
 ///
 /// JOSE header struct with all fields relevant to us.
@@ -140,10 +137,11 @@ struct ValidationClaims {
 ///
 /// A vector of ValidationStep variants that can be passed into the [`validate_jwt`] function.
 ///
-pub fn default_validations(issuer: &str,
-                           audience: Option<&str>,
-                           nonce: Option<&str>) -> Vec<ValidationStep> {
-
+pub fn default_validations(
+  issuer: &str,
+  audience: Option<&str>,
+  nonce: Option<&str>,
+) -> Vec<ValidationStep> {
   /* Create vector of bare minimum validations */
   let mut validations = vec![
     ValidationStep::Issuer(issuer.to_string()),
@@ -176,21 +174,24 @@ pub fn default_validations(issuer: &str,
 ///
 /// All claims found in the JWT on success.
 ///
-pub async fn validate_jwt(jwt: &str,
-                          validation_steps: &Vec<ValidationStep>,
-                          keystore: &KeyStore) -> BBResult<JWTClaims> {
-
+pub async fn validate_jwt(
+  jwt: &str,
+  validation_steps: &Vec<ValidationStep>,
+  keystore: &KeyStore,
+) -> BBResult<JWTClaims> {
   /* A JWT is a Base64 encoded string with 3 parts separated by dots:
    * HEADER.CLAIMS.SIGNATURE */
   let parts: Vec<&str> = jwt.splitn(3, '.').collect();
   if parts.len() != 3 {
-    return Err(BBError::TokenInvalid("Could not split token in 3 parts.".to_string()));
+    return Err(BBError::TokenInvalid(
+      "Could not split token in 3 parts.".to_string(),
+    ));
   }
 
   /* Get the JOSE header */
   let hdr_json = base64::decode_config(parts[0], base64_config())?;
-  let kid_hdr: JOSEHeader = serde_json::from_slice(&hdr_json)
-    .map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
+  let kid_hdr: JOSEHeader =
+    serde_json::from_slice(&hdr_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
   /* Deny JWTs with no algorithm; see [here](https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1) */
   if kid_hdr.alg == KeyAlgorithm::Other {
@@ -207,8 +208,8 @@ pub async fn validate_jwt(jwt: &str,
 
   /* decode the payload so we can verify its contents */
   let payload_json = base64::decode_config(parts[1], base64_config())?;
-  let claims: ValidationClaims = serde_json::from_slice(&payload_json)
-    .map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
+  let claims: ValidationClaims =
+    serde_json::from_slice(&payload_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
   /* Be nice: return all validation errors at once */
   let mut validation_errors = Vec::<&str>::new();
@@ -247,9 +248,7 @@ pub async fn validate_jwt(jwt: &str,
 /// None on success or an error string on validation error.
 ///
 fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'static str> {
-
   match step {
-
     ValidationStep::Audience(aud) => {
       if let Some(claims_aud) = &claims.aud {
         match claims_aud {
@@ -257,7 +256,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
             if single != aud {
               return Some("'aud' does not match");
             }
-          },
+          }
           Audience::Multi(multi) => {
             if !multi.contains(aud) {
               return Some("'aud' claims don't match");
@@ -267,7 +266,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
       } else {
         return Some("'aud' not set");
       }
-    },
+    }
 
     ValidationStep::Issuer(iss) => {
       if let Some(claims_iss) = &claims.iss {
@@ -277,7 +276,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
       } else {
         return Some("'iss' is missing");
       }
-    },
+    }
 
     ValidationStep::Nonce(nonce) => {
       if let Some(claims_nonce) = &claims.nonce {
@@ -287,7 +286,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
       } else {
         return Some("'noncev is missing");
       }
-    },
+    }
 
     ValidationStep::NotExpired => {
       if let Some(exp) = &claims.exp {
@@ -299,25 +298,23 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
           return Some("Token has expired.");
         }
       }
-    },
+    }
 
     ValidationStep::HasSubject => {
       if claims.sub.is_none() {
         return Some("'sub' is missing");
       }
-    },
+    }
 
     ValidationStep::HasGroups => {
       if claims.groups.is_none() {
         return Some("'groups' is missing");
       }
-    },
+    }
   }
 
   None
-
 }
-
 
 ///
 /// Check if a JWT's signature is correct.
@@ -328,13 +325,11 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
 /// * `verifier` - The OpenSSL verifier to use
 ///
 fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
-
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
   let sig = base64::decode_config(jwt_parts[2], base64_config())
-    .map_err(|e|BBError::DecodeError(format!("{:?}", e))
-  )?;
+    .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
 
   pubkey.verify_signature(jwt_data.as_bytes(), &sig)
 }

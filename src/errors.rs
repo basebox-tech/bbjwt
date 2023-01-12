@@ -8,7 +8,6 @@
 
 use thiserror::Error;
 
-
 /* --- public types ----------------------------------------------------------------------------- */
 
 pub type BBResult<T> = Result<T, BBError>;
@@ -19,7 +18,6 @@ pub type BBResult<T> = Result<T, BBError>;
 #[allow(dead_code)]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BBError {
-
   #[error("Network/load error: {0}")]
   /// Some network communication failed.
   NetworkError(String),
@@ -63,12 +61,9 @@ pub enum BBError {
   #[error("Unknown/unspecified error")]
   /// Something went wrong for an unknown reason; should never be used :-)
   Unknown,
-
 }
 
-
 impl BBError {
-
   ///
   /// Return name for each error variant.
   ///
@@ -89,8 +84,7 @@ impl BBError {
   }
 }
 
-
-impl From <base64::DecodeError> for BBError {
+impl From<base64::DecodeError> for BBError {
   fn from(err: base64::DecodeError) -> Self {
     BBError::DecodeError(err.to_string())
   }
@@ -98,6 +92,6 @@ impl From <base64::DecodeError> for BBError {
 
 impl From<serde_json::Error> for BBError {
   fn from(err: serde_json::Error) -> Self {
-      BBError::JSONError(err.to_string())
+    BBError::JSONError(err.to_string())
   }
 }

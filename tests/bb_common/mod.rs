@@ -12,10 +12,10 @@
 extern crate color_backtrace;
 extern crate env_logger;
 
-use std::sync::Once;
 use std::cell::RefCell;
-use std::path::Path;
 use std::env;
+use std::path::Path;
+use std::sync::Once;
 
 /* ---- statics --------------------------------------------------------------------------------- */
 
@@ -24,7 +24,6 @@ static INIT_LOG: Once = Once::new();
 thread_local! {
   static TEST_ID: RefCell<&'static str> = RefCell::new("UNINITIALIZED_TEST_ID");
 }
-
 
 ///
 /// Store the current test's ID in the thread local RefCell
@@ -40,7 +39,6 @@ pub fn get_test_id() -> &'static str {
   TEST_ID.with(|id| *id.borrow())
 }
 
-
 /* ---- macros ---------------------------------------------------------------------------------- */
 
 ///
@@ -52,7 +50,6 @@ macro_rules! log_error {
     error!("[{}] {}", crate::bb_common::get_test_id(), format!($($args)+))
   }
 }
-
 
 ///
 /// Log info; syntax is the same as for println!()
@@ -106,9 +103,12 @@ pub fn init_log(test_id: &'static str) {
 /// Absolute path to the asset file.
 ///
 pub fn path_to_asset_file(asset_name: &str) -> String {
-  let path = Path::new(env::var("CARGO_MANIFEST_DIR")
-    .expect("CARGO_MANIFEST_DIR not set").as_str()
-  ).join(format!("tests/assets/{}", asset_name));
+  let path = Path::new(
+    env::var("CARGO_MANIFEST_DIR")
+      .expect("CARGO_MANIFEST_DIR not set")
+      .as_str(),
+  )
+  .join(format!("tests/assets/{}", asset_name));
 
   String::from(path.to_str().unwrap())
 }
