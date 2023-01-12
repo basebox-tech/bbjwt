@@ -1,5 +1,8 @@
 JWT validation library for [basebox](https://basebox.tech) (and maybe others :-) )
 
+[![Build Status](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml/badge.svg)](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml)
+
+
 # Synopsis
 
 This lib was created to provide a straight forward, simple and reliable way to validate
@@ -93,7 +96,7 @@ async fn main() {
 
 ### Using public keys from memory
 
-When loading public keys from local file or buffer, you can either load a JWK JSON or a PEM encoded 
+When loading public keys from local file or buffer, you can either load a JWK JSON or a PEM encoded
 text. JWKs contain all required info to identify the type of key, but for PEM you need to use
 the function that corresponds to the type of key.
 
