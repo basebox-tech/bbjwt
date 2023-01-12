@@ -9,7 +9,7 @@ authors = [
   "Markus Thielen <markus.thielen@basebox.tech>",
 ]
 keywords = [
-  "jose", "jwt", "OpenID Connect", "crypto"
+  "jose", "jwt", "openid-connect", "crypto"
 ]
 description = "A simple to use, well documented JWT validation library, mainly for validating OpenID Connect ID Tokens."
 
