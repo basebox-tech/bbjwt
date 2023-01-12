@@ -2,7 +2,7 @@ JWT validation library for [basebox](https://basebox.tech) (and maybe others :-)
 
 [![Build Status](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml/badge.svg)](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml)
 [![crates.io](https://img.shields.io/crates/v/bbjwt.svg)](https://crates.io/crates/bbjwt)
-[![docs.rs](https://docs.rs/bbjwt/badge.svg)](https://docs.rs/bbwjt)
+[![docs.rs](https://docs.rs/bbjwt/badge.svg)](https://docs.rs/bbjwt)
 
 
 
