@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 readme = "README.md"
 homepage = "https://basebox.tech"
+repository = "https://github.com/basebox-tech/bbjwt"
 authors = [
   "Markus Thielen <markus.thielen@basebox.tech>",
 ]
