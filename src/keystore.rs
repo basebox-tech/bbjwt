@@ -835,6 +835,7 @@ impl KeyStore {
   ///
   /// Clients should call this function when [`KeyStore::should_reload`] returns true.
   ///
+  #[allow(clippy::await_holding_lock)]
   pub async fn load_keys(&mut self) -> BBResult<()> {
     let url = self
       .url
@@ -847,6 +848,11 @@ impl KeyStore {
       .write()
       .map_err(|e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e)))?;
     keys.clear();
+    /* drop the cache write lock so we do not hold it during the refresh request.
+     * Note: Clippy emits a false positive about a lock being held while an async
+     * function is being awaited. The lock is dropped explicitly here.
+     * See here https://github.com/rust-lang/rust-clippy/issues/9208
+     */
     drop(keys);
 
     let mut response = reqwest::get(&url)
