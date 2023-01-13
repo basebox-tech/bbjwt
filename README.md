@@ -159,6 +159,12 @@ async fn main() {
 
 JWTs are passed as Base64 encoded strings; for details about this format, see e.g. <https://jwt.io>.
 
+To validate a JWT, you pass the base64 encoded JWT and a vector of [`ValidationStep`]s into [`validate_jwt`]. bbjwt provides a convenience function named [`default_validations`] to create a vector of default validation steps.
+
+If the JWT is valid, [`validate_jwt`] returns all claims that the JWT contains (header and payload).
+
+Example:
+
 ```rust no_run
 use bbjwt::{KeyStore, default_validations, validate_jwt};
 
@@ -170,7 +176,11 @@ async fn main() {
   // Validate a JWT
   let jwt = validate_jwt(
     "<Base64 encoded JWT>",
-    &default_validations("https://idp.domain.url/realm/testing", None, None),
+    &default_validations(
+      // required value for the "iss" claim
+      "https://idp.domain.url/realm/testing",
+      None,
+      None),
     &keystore
   )
   .await
