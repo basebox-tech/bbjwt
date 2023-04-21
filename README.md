@@ -1,4 +1,4 @@
-JWT validation library for [basebox](https://basebox.tech) (and maybe others :-) )
+JWT validation library for [basebox](https://basebox.io) (and maybe others :-) )
 
 [![Build Status](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml/badge.svg)](https://github.com/basebox-tech/bbjwt/actions/workflows/main.yml)
 [![crates.io](https://img.shields.io/crates/v/bbjwt.svg)](https://crates.io/crates/bbjwt)
@@ -10,7 +10,7 @@ JWT validation library for [basebox](https://basebox.tech) (and maybe others :-)
 
 This lib was created to provide a straight forward, simple and reliable way to validate
 JWTs against a set of public keys loaded from a URL.
-We at [basebox](https://basebox.tech) use it to validate OpenID Connect ID Tokens (which are JWTs)
+We at [basebox](https://basebox.io) use it to validate OpenID Connect ID Tokens (which are JWTs)
 using the set of public keys published by the OpenID server (e.g. Keycloak).
 
 It provides the following features:
