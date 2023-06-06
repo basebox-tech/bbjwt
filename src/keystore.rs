@@ -19,6 +19,7 @@
 /* --- uses ------------------------------------------------------------------------------------- */
 
 use crate::errors::*;
+use base64::Engine;
 use openssl::ecdsa::EcdsaSig;
 use std::fmt::{self};
 use std::sync::RwLock;
@@ -46,7 +47,11 @@ use openssl::sign::Verifier;
 /// See [`KeyStore::set_reload_factor`] for more info.
 pub const RELOAD_INTERVAL_FACTOR: f64 = 0.75;
 
+pub const BASE64_ENGINE: base64::engine::general_purpose::GeneralPurpose =
+  base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
 /* --- types ------------------------------------------------------------------------------------ */
+
 
 ///
 /// A key as we store it in the key store.
@@ -412,9 +417,9 @@ impl BBKey {
 ///
 /// Return config instance for base64 decoding of JWTs.
 ///
-pub fn base64_config() -> base64::Config {
-  base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
-}
+// pub fn base64_config() -> base64::Config {
+//   base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
+// }
 
 ///
 /// Create a BigNum from a base64 encoded string.
@@ -425,7 +430,7 @@ pub fn base64_config() -> base64::Config {
 /// * `error_context` - a string to include in error messages
 ///
 fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
-  let bytes = base64::decode_config(b64, base64_config())
+  let bytes = BASE64_ENGINE.decode(b64)
     .map_err(|e| BBError::DecodeError(format!("{error_context}: '{:?}'", e)))?;
 
   BigNum::from_slice(&bytes).map_err(|e| {
@@ -513,7 +518,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
           "Missing x for OKP key '{kid}'"
         )));
       }
-      let bytes = base64::decode_config(jwk.x.as_ref().unwrap(), base64_config())
+      let bytes = BASE64_ENGINE.decode(jwk.x.as_ref().unwrap())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
       let curve_id = match jwk.crv {
         Some(EcCurve::Ed25519) => Id::ED25519,

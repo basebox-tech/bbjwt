@@ -12,13 +12,14 @@
 #[macro_use]
 extern crate serde_derive;
 
+use base64::Engine;
 pub use errors::{BBError, BBResult};
 pub use keystore::KeyStore;
 pub use keystore::{EcCurve, KeyAlgorithm};
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use keystore::base64_config;
+use keystore::BASE64_ENGINE;
 use keystore::BBKey;
 
 /* --- mods ------------------------------------------------------------------------------------- */
@@ -189,7 +190,7 @@ pub async fn validate_jwt(
   }
 
   /* Get the JOSE header */
-  let hdr_json = base64::decode_config(parts[0], base64_config())?;
+  let hdr_json = BASE64_ENGINE.decode(parts[0])?;
   let kid_hdr: JOSEHeader =
     serde_json::from_slice(&hdr_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
@@ -207,7 +208,7 @@ pub async fn validate_jwt(
   }
 
   /* decode the payload so we can verify its contents */
-  let payload_json = base64::decode_config(parts[1], base64_config())?;
+  let payload_json = BASE64_ENGINE.decode(parts[1])?;
   let claims: ValidationClaims =
     serde_json::from_slice(&payload_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
@@ -328,7 +329,7 @@ fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
-  let sig = base64::decode_config(jwt_parts[2], base64_config())
+  let sig = BASE64_ENGINE.decode(jwt_parts[2])
     .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
 
   pubkey.verify_signature(jwt_data.as_bytes(), &sig)
