@@ -213,7 +213,7 @@ pub async fn validate_jwt(
     serde_json::from_slice(&payload_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
   /* Be nice: return all validation errors at once */
-  let mut validation_errors = Vec::<&str>::new();
+  let mut validation_errors = Vec::<String>::new();
 
   for step in validation_steps {
     if let Some(error) = validate_claim(&claims, step) {
@@ -248,44 +248,50 @@ pub async fn validate_jwt(
 ///
 /// None on success or an error string on validation error.
 ///
-fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'static str> {
+fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<String> {
   match step {
     ValidationStep::Audience(aud) => {
       if let Some(claims_aud) = &claims.aud {
         match claims_aud {
           Audience::Single(single) => {
             if single != aud {
-              return Some("'aud' does not match");
+              return Some(
+                format!("'aud' does not match; expected '{}', got '{}'", aud, single)
+              );
             }
           }
           Audience::Multi(multi) => {
             if !multi.contains(aud) {
-              return Some("'aud' claims don't match");
+              return Some(
+                format!("'aud' claims don't match: '{}' not found in '{:?}'", aud, multi)
+              );
             }
           }
         }
       } else {
-        return Some("'aud' not set");
+        return Some("'aud' not set".to_string());
       }
     }
 
     ValidationStep::Issuer(iss) => {
       if let Some(claims_iss) = &claims.iss {
         if claims_iss != iss {
-          return Some("'iss' does not match");
+          return Some(
+            format!("'iss' does not match; expected '{}', got '{}'", iss, claims_iss)
+          );
         }
       } else {
-        return Some("'iss' is missing");
+        return Some("'iss' is missing".to_string());
       }
     }
 
     ValidationStep::Nonce(nonce) => {
       if let Some(claims_nonce) = &claims.nonce {
         if claims_nonce != nonce {
-          return Some("'nonce' does not match");
+          return Some("'nonce' does not match".to_string());
         }
       } else {
-        return Some("'noncev is missing");
+        return Some("'nonce' is missing".to_string());
       }
     }
 
@@ -296,20 +302,20 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<&'
           .duration_since(UNIX_EPOCH)
           .expect("System time is wrong.");
         if Duration::from_secs(*exp) < now {
-          return Some("Token has expired.");
+          return Some("Token has expired.".to_string());
         }
       }
     }
 
     ValidationStep::HasSubject => {
       if claims.sub.is_none() {
-        return Some("'sub' is missing");
+        return Some("'sub' is missing".to_string());
       }
     }
 
     ValidationStep::HasGroups => {
       if claims.groups.is_none() {
-        return Some("'groups' is missing");
+        return Some("'groups' is missing".to_string());
       }
     }
   }
@@ -333,4 +339,69 @@ fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
     .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
 
   pubkey.verify_signature(jwt_data.as_bytes(), &sig)
+}
+
+
+#[cfg(test)]
+
+mod tests {
+
+  use core::panic;
+
+use super::*;
+
+  ///
+  /// Return empty validations.
+  ///
+  fn empty_validations() -> ValidationClaims {
+    ValidationClaims {
+      aud: None,
+      iss: None,
+      nonce: None,
+      exp: None,
+      sub: None,
+      groups: None,
+    }
+  }
+
+  #[test]
+  fn validate_aud_claim() {
+    let claims = ValidationClaims {
+      aud: Some(Audience::Single("test".to_string())),
+      ..empty_validations()
+    };
+
+    let step = ValidationStep::Audience("test".to_string());
+    assert!(validate_claim(&claims, &step).is_none());
+
+    let step = ValidationStep::Audience("test2".to_string());
+    if let Some(err_str) = validate_claim(&claims, &step) {
+      /* assert we get a detailed error string */
+      assert_eq!(err_str, "'aud' does not match; expected 'test2', got 'test'");
+    } else {
+      panic!("Invalid aud did not fail validation");
+    }
+
+  }
+
+  #[test]
+  fn validate_iss_claim() {
+    let claims = ValidationClaims {
+      iss: Some("test".to_string()),
+      ..empty_validations()
+    };
+
+    let step = ValidationStep::Issuer("test".to_string());
+    assert!(validate_claim(&claims, &step).is_none());
+
+    let step = ValidationStep::Issuer("test2".to_string());
+    if let Some(err_str) = validate_claim(&claims, &step) {
+      /* assert we get a detailed error string */
+      assert_eq!(err_str, "'iss' does not match; expected 'test2', got 'test'");
+    } else {
+      panic!("Invalid iss did not fail validation");
+    }
+
+  }
+
 }
