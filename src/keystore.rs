@@ -52,7 +52,6 @@ pub const BASE64_ENGINE: base64::engine::general_purpose::GeneralPurpose =
 
 /* --- types ------------------------------------------------------------------------------------ */
 
-
 ///
 /// A key as we store it in the key store.
 ///
@@ -430,7 +429,8 @@ impl BBKey {
 /// * `error_context` - a string to include in error messages
 ///
 fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
-  let bytes = BASE64_ENGINE.decode(b64)
+  let bytes = BASE64_ENGINE
+    .decode(b64)
     .map_err(|e| BBError::DecodeError(format!("{error_context}: '{:?}'", e)))?;
 
   BigNum::from_slice(&bytes).map_err(|e| {
@@ -518,7 +518,8 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
           "Missing x for OKP key '{kid}'"
         )));
       }
-      let bytes = BASE64_ENGINE.decode(jwk.x.as_ref().unwrap())
+      let bytes = BASE64_ENGINE
+        .decode(jwk.x.as_ref().unwrap())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
       let curve_id = match jwk.crv {
         Some(EcCurve::Ed25519) => Id::ED25519,

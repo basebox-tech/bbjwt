@@ -19,8 +19,8 @@ pub use keystore::{EcCurve, KeyAlgorithm};
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use keystore::BASE64_ENGINE;
 use keystore::BBKey;
+use keystore::BASE64_ENGINE;
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -255,16 +255,18 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
         match claims_aud {
           Audience::Single(single) => {
             if single != aud {
-              return Some(
-                format!("'aud' does not match; expected '{}', got '{}'", aud, single)
-              );
+              return Some(format!(
+                "'aud' does not match; expected '{}', got '{}'",
+                aud, single
+              ));
             }
           }
           Audience::Multi(multi) => {
             if !multi.contains(aud) {
-              return Some(
-                format!("'aud' claims don't match: '{}' not found in '{:?}'", aud, multi)
-              );
+              return Some(format!(
+                "'aud' claims don't match: '{}' not found in '{:?}'",
+                aud, multi
+              ));
             }
           }
         }
@@ -276,9 +278,10 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
     ValidationStep::Issuer(iss) => {
       if let Some(claims_iss) = &claims.iss {
         if claims_iss != iss {
-          return Some(
-            format!("'iss' does not match; expected '{}', got '{}'", iss, claims_iss)
-          );
+          return Some(format!(
+            "'iss' does not match; expected '{}', got '{}'",
+            iss, claims_iss
+          ));
         }
       } else {
         return Some("'iss' is missing".to_string());
@@ -335,12 +338,12 @@ fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
-  let sig = BASE64_ENGINE.decode(jwt_parts[2])
+  let sig = BASE64_ENGINE
+    .decode(jwt_parts[2])
     .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
 
   pubkey.verify_signature(jwt_data.as_bytes(), &sig)
 }
-
 
 #[cfg(test)]
 
@@ -348,7 +351,7 @@ mod tests {
 
   use core::panic;
 
-use super::*;
+  use super::*;
 
   ///
   /// Return empty validations.
@@ -377,11 +380,13 @@ use super::*;
     let step = ValidationStep::Audience("test2".to_string());
     if let Some(err_str) = validate_claim(&claims, &step) {
       /* assert we get a detailed error string */
-      assert_eq!(err_str, "'aud' does not match; expected 'test2', got 'test'");
+      assert_eq!(
+        err_str,
+        "'aud' does not match; expected 'test2', got 'test'"
+      );
     } else {
       panic!("Invalid aud did not fail validation");
     }
-
   }
 
   #[test]
@@ -397,11 +402,12 @@ use super::*;
     let step = ValidationStep::Issuer("test2".to_string());
     if let Some(err_str) = validate_claim(&claims, &step) {
       /* assert we get a detailed error string */
-      assert_eq!(err_str, "'iss' does not match; expected 'test2', got 'test'");
+      assert_eq!(
+        err_str,
+        "'iss' does not match; expected 'test2', got 'test'"
+      );
     } else {
       panic!("Invalid iss did not fail validation");
     }
-
   }
-
 }
