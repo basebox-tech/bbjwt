@@ -52,7 +52,7 @@ pub enum BBError {
 
   #[error("Invalid signature")]
   /// The signature could not be verified.
-  SignatureInvalid(),
+  SignatureInvalid,
 
   #[error("Error: {0}")]
   /// Some other error.
@@ -69,16 +69,16 @@ impl BBError {
   ///
   pub fn name(&self) -> String {
     match self {
-      Self::NetworkError(..) => "NetworkError".to_string(),
-      Self::TokenInvalid(..) => "TokenInvalid".to_string(),
-      Self::URLInvalid(..) => "URLInvalid".to_string(),
-      Self::JWKInvalid(..) => "JWKInvalid".to_string(),
-      Self::Fatal(..) => "Fatal".to_string(),
-      Self::DecodeError(..) => "DecodeError".to_string(),
-      Self::JSONError(..) => "JSONError".to_string(),
-      Self::ClaimInvalid(..) => "ClaimInvalid".to_string(),
-      Self::SignatureInvalid(..) => "SignatureInvalid".to_string(),
-      Self::Other(..) => "Other".to_string(),
+      Self::NetworkError(_) => "NetworkError".to_string(),
+      Self::TokenInvalid(_) => "TokenInvalid".to_string(),
+      Self::URLInvalid(_) => "URLInvalid".to_string(),
+      Self::JWKInvalid(_) => "JWKInvalid".to_string(),
+      Self::Fatal(_) => "Fatal".to_string(),
+      Self::DecodeError(_) => "DecodeError".to_string(),
+      Self::JSONError(_) => "JSONError".to_string(),
+      Self::ClaimInvalid(_) => "ClaimInvalid".to_string(),
+      Self::SignatureInvalid => "SignatureInvalid".to_string(),
+      Self::Other(_) => "Other".to_string(),
       Self::Unknown => "Unknown".to_string(),
     }
   }

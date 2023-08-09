@@ -9,9 +9,6 @@
 
 /* ---- uses ------------------------------------------------------------------------------------ */
 
-extern crate color_backtrace;
-extern crate env_logger;
-
 use std::cell::RefCell;
 use std::env;
 use std::path::Path;
