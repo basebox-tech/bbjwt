@@ -21,13 +21,10 @@ ring = { version = "0.16.20", features = ["std"] }
 simple_asn1 = "0.6.2"
 pem = "3.0.1"
 derive_more = "0.99.17"
-ed25519 = "2.2.1"
 p384 = "0.13.0"
 p256 = "0.13.2"
 pkcs1 = { version = "0.7.5", features = ["std"] }
 der = { version = "0.7.8", features = ["alloc"] }
-ed448-rust = "0.1.1"
-num-bigint = "0.4.3"
 
 [dev-dependencies]
 rand = "0.8"

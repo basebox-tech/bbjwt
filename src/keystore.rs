@@ -21,9 +21,7 @@ use crate::errors::*;
 use crate::pem::decoder::PemEncodedKey;
 use base64::Engine;
 use der::Encode;
-use num_bigint::BigInt;
 use p256::elliptic_curve::generic_array::GenericArray;
-use p256::elliptic_curve::sec1::FromEncodedPoint as _;
 use ring::digest;
 use ring::signature::VerificationAlgorithm;
 use serde::Deserialize;
@@ -221,16 +219,19 @@ impl KeyAlgorithm {
   }
 
   ///
-  /// Return verification implementation
+  /// Return verification implementation.
+  /// Care must be taken to avoid a mismatch between this function
+  /// and its sole caller [`BBKey::verify_signature`], otherwise it will panic.
   ///
-  pub(crate) fn verification(&self) -> &'static dyn VerificationAlgorithm {
+  fn verification(&self) -> &'static dyn VerificationAlgorithm {
     match self {
       KeyAlgorithm::RS256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
       KeyAlgorithm::RS384 => &ring::signature::RSA_PKCS1_2048_8192_SHA384,
       KeyAlgorithm::RS512 => &ring::signature::RSA_PKCS1_2048_8192_SHA512,
       KeyAlgorithm::ES256 => &ring::signature::ECDSA_P256_SHA256_FIXED,
       KeyAlgorithm::ES384 => &ring::signature::ECDSA_P384_SHA384_FIXED,
-      KeyAlgorithm::ES512 => todo!(),
+      // hitting this is a programming error
+      KeyAlgorithm::ES512 => unimplemented!(),
       KeyAlgorithm::EdDSA => &ring::signature::ED25519,
       // hitting this is a programming error
       KeyAlgorithm::Other => unimplemented!(),
@@ -279,6 +280,16 @@ impl BBKey {
   /// * `signature` - the signature to verify
   ///
   pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<()> {
+    if matches!(
+      (&self.alg, &self.crv),
+      (KeyAlgorithm::EdDSA, Some(EcCurve::Ed448))
+    ) {
+      return Err(BBError::Other(format!(
+        "Unsupported key algorithm for key '{}'",
+        *self
+      )));
+    }
+
     match self.alg {
       KeyAlgorithm::RS256
       | KeyAlgorithm::RS384
@@ -286,22 +297,12 @@ impl BBKey {
       | KeyAlgorithm::ES256
       | KeyAlgorithm::ES384
       | KeyAlgorithm::EdDSA => {
-        // TODO hacky, AND it does not work
-        if matches!(self.crv, Some(EcCurve::Ed448)) {
-          let key: ed448_rust::PublicKey =
-            BigInt::from_bytes_be(num_bigint::Sign::Plus, self.key.as_ref()).into();
-          let res = key
-            .verify(payload, signature, None)
-            .map_err(|_| BBError::SignatureInvalid);
-          res
-        } else {
-          let key =
-            ring::signature::UnparsedPublicKey::new(self.alg.verification(), self.key.as_ref());
-          let res = key
-            .verify(payload, signature)
-            .map_err(|_| BBError::SignatureInvalid);
-          return res;
-        }
+        let key =
+          ring::signature::UnparsedPublicKey::new(self.alg.verification(), self.key.as_ref());
+        let res = key
+          .verify(payload, signature)
+          .map_err(|_| BBError::SignatureInvalid);
+        return res;
       }
 
       _ => Err(BBError::Other(format!(
@@ -354,7 +355,11 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         )
         .to_bytes()
         .into(),
-        EcCurve::SECP256K1 => todo!(),
+        EcCurve::SECP256K1 => {
+          return Err(BBError::JWKInvalid(format!(
+            "Unsupported curve: SECP256K1 for EC key '{kid}'"
+          )))
+        }
         EcCurve::P384 => p384::EncodedPoint::from_affine_coordinates(
           GenericArray::from_slice(&x),
           GenericArray::from_slice(&y),
@@ -362,10 +367,14 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         )
         .to_bytes()
         .into(),
-        EcCurve::P521 => todo!(),
-        // TODO is this a possible code path?
+        EcCurve::P521 => {
+          return Err(BBError::JWKInvalid(format!(
+            "Unsupported curve: P521 for EC key '{kid}'"
+          )))
+        }
+        // TODO is this a possible code path? I think not (AU)
         EcCurve::Ed25519 => x,
-        // TODO is this a possible code path?
+        // TODO is this a possible code path? I think not (AU)
         EcCurve::Ed448 => x,
       };
 
@@ -383,14 +392,16 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
       let e = BASE64_ENGINE.decode(jwk.e.as_ref().unwrap())?;
 
       let n = der::asn1::UintRef::new(&n)
-        .map_err(|e| BBError::JWKInvalid(format!("Invalid n for RSA key '{kid}'")))?;
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid n for RSA key '{kid}'")))?;
       let e = der::asn1::UintRef::new(&e)
-        .map_err(|e| BBError::JWKInvalid(format!("Invalid e for RSA key '{kid}'")))?;
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid e for RSA key '{kid}'")))?;
       let key = pkcs1::RsaPublicKey {
         modulus: n,
         public_exponent: e,
       };
-      key.to_der().unwrap()
+      key
+        .to_der()
+        .map_err(|_| BBError::JWKInvalid(format!("DER encoding failed for RSA key '{kid}'")))?
     }
 
     KeyType::OKP => {
@@ -604,7 +615,10 @@ impl KeyStore {
     let pem_key = PemEncodedKey::new(pem.as_bytes())
       .map_err(|e| BBError::Other(format!("Could not read PEM EdDSA/EC pub key: {:?}", e)))?;
 
-    let mut key_data = match alg {
+    // Decode PEM content to DER. This is what `ring` (verification algorithm implementation) expects.
+    // However: currently, ring does not support Ed448.
+    // The `ed448_rust` crate expects a different format (`num_bigint::BigInt`, little-endian).
+    let key_data = match alg {
       KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => pem_key
         .as_ec_public_key()
         .map_err(|e| BBError::Other(format!("PEM does not contain an EC public key: {:?}", e)))?,
@@ -612,13 +626,6 @@ impl KeyStore {
         .as_ed_public_key()
         .map_err(|e| BBError::Other(format!("PEM does not contain an Ed public key: {:?}", e)))?,
     };
-
-    // TODO (DER vs bigint repr?)
-    if matches!(curve, EcCurve::Ed448) {
-      key_data = pem_key
-        .as_ed_public_key()
-        .map_err(|e| BBError::Other(format!("PEM does not contain an Ed public key: {:?}", e)))?;
-    }
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),

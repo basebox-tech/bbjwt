@@ -38,8 +38,8 @@ enum Classification {
 /// EC keys contain a section within that ultimately has the configuration
 /// that ring uses.
 /// Documentation about these formats is at
-/// PKCS#1: https://tools.ietf.org/html/rfc8017
-/// PKCS#8: https://tools.ietf.org/html/rfc5958
+/// PKCS#1: <https://tools.ietf.org/html/rfc8017>
+/// PKCS#8: <https://tools.ietf.org/html/rfc5958>
 #[derive(Debug)]
 pub(crate) struct PemEncodedKey {
   content: Vec<u8>,
