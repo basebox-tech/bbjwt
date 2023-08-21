@@ -330,7 +330,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
 /// # Arguments
 ///
 /// * `jwt_parts` - JWT split by '.'; must be a vector of 3 strings
-/// * `verifier` - The OpenSSL verifier to use
+/// * `pubkey` - The key to use for verification
 ///
 fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<()> {
   /* first 2 parts are JWT data */
