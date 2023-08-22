@@ -1,8 +1,7 @@
 //!
 //! Keystore and key handling for bbjwt.
 //!
-//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS) as well as
-//! OpenSSL related functionality, e.g. converting JWKs into something OpenSSL can work with.
+//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS).
 //!
 //! Keys might have an expiration time; while this implementation supports updating
 //! expired keys by reloading them from the original URL, it does not provide cron-like
@@ -19,26 +18,17 @@
 /* --- uses ------------------------------------------------------------------------------------- */
 
 use crate::errors::*;
+use crate::pem::decoder::PemEncodedKey;
 use base64::Engine;
-use openssl::ecdsa::EcdsaSig;
+use der::Encode;
+use p256::elliptic_curve::generic_array::GenericArray;
+use ring::digest;
+use ring::signature::VerificationAlgorithm;
+use serde::Deserialize;
 use std::fmt::{self};
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 use url::Url;
-
-extern crate base64;
-extern crate openssl;
-extern crate serde;
-extern crate serde_json;
-
-use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
-use openssl::hash::{hash, MessageDigest};
-use openssl::nid::Nid;
-use openssl::pkey::Id;
-use openssl::pkey::{PKey, Public};
-use openssl::rsa::Rsa;
-use openssl::sign::Verifier;
 
 /* --- constants -------------------------------------------------------------------------------- */
 
@@ -53,25 +43,27 @@ pub const BASE64_ENGINE: base64::engine::general_purpose::GeneralPurpose =
 /* --- types ------------------------------------------------------------------------------------ */
 
 ///
-/// A key as we store it in the key store.
-///
-/// This is basically an OpenSSL [`PKey<Public>`] with required fields from the original JWK.
-///
+/// A key as we store it in the key store, modeled after JWK.
 ///
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BBKey {
-  /// OpenSSL public key
-  key: PKey<Public>,
   /// Optional key ID from the JWK
   kid: Option<String>,
   /// Key type
   kty: KeyType,
+  /// DER encoded key data
+  key: PublicKey,
+
   /// Curve for elliptic curve algorithms
   crv: Option<EcCurve>,
   /// Hash algorithm
   alg: KeyAlgorithm,
 }
+
+use derive_more::{AsRef, From, Into};
+#[derive(Debug, Clone, From, Into, AsRef)]
+pub struct PublicKey(Vec<u8>);
 
 ///
 /// JWK key type enum
@@ -217,26 +209,32 @@ impl KeyAlgorithm {
   ///
   /// Return message digest for an algorithm.
   ///
-  pub fn message_digest(&self) -> Option<MessageDigest> {
-    match *self {
-      KeyAlgorithm::RS256 | KeyAlgorithm::ES256 => Some(MessageDigest::sha256()),
-      KeyAlgorithm::RS384 | KeyAlgorithm::ES384 => Some(MessageDigest::sha384()),
-      KeyAlgorithm::RS512 | KeyAlgorithm::ES512 => Some(MessageDigest::sha512()),
+  pub fn message_digest(&self) -> Option<&'static digest::Algorithm> {
+    match self {
+      KeyAlgorithm::RS256 | KeyAlgorithm::ES256 => Some(&digest::SHA256),
+      KeyAlgorithm::RS384 | KeyAlgorithm::ES384 => Some(&digest::SHA384),
+      KeyAlgorithm::RS512 | KeyAlgorithm::ES512 => Some(&digest::SHA512),
       _ => None,
     }
   }
 
   ///
-  /// Return signature length.
+  /// Return verification implementation.
+  /// Care must be taken to avoid a mismatch between this function
+  /// and its sole caller [`BBKey::verify_signature`], otherwise it will panic.
   ///
-  /// Only applies to elliptic curve algorithms.
-  ///
-  pub fn signature_length(&self) -> usize {
-    match *self {
-      KeyAlgorithm::ES256 => 64,
-      KeyAlgorithm::ES384 => 96,
-      KeyAlgorithm::ES512 => 132,
-      _ => 0,
+  fn verification(&self) -> &'static dyn VerificationAlgorithm {
+    match self {
+      KeyAlgorithm::RS256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+      KeyAlgorithm::RS384 => &ring::signature::RSA_PKCS1_2048_8192_SHA384,
+      KeyAlgorithm::RS512 => &ring::signature::RSA_PKCS1_2048_8192_SHA512,
+      KeyAlgorithm::ES256 => &ring::signature::ECDSA_P256_SHA256_FIXED,
+      KeyAlgorithm::ES384 => &ring::signature::ECDSA_P384_SHA384_FIXED,
+      // hitting this is a programming error
+      KeyAlgorithm::ES512 => unimplemented!(),
+      KeyAlgorithm::EdDSA => &ring::signature::ED25519,
+      // hitting this is a programming error
+      KeyAlgorithm::Other => unimplemented!(),
     }
   }
 }
@@ -252,30 +250,13 @@ impl Default for KeyAlgorithm {
 
 impl EcCurve {
   ///
-  /// Return message digest for a curve.
+  /// Return message digest algorithm for a curve.
   ///
-  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
-  ///
-  pub fn message_digest(&self) -> Option<MessageDigest> {
-    match *self {
-      EcCurve::P256 => Some(MessageDigest::sha256()),
-      EcCurve::P384 => Some(MessageDigest::sha384()),
-      EcCurve::P521 => Some(MessageDigest::sha512()),
-      _ => None,
-    }
-  }
-
-  ///
-  /// Map elliptic curve variant to its matching OpenSSL NID.
-  ///
-  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
-  ///
-  pub fn nid(&self) -> Option<Nid> {
-    match *self {
-      EcCurve::SECP256K1 => Some(Nid::SECP256K1),
-      EcCurve::P256 => Some(Nid::X9_62_PRIME256V1),
-      EcCurve::P384 => Some(Nid::SECP384R1),
-      EcCurve::P521 => Some(Nid::SECP521R1),
+  pub fn message_digest(&self) -> Option<&'static digest::Algorithm> {
+    match self {
+      EcCurve::P256 => Some(&digest::SHA256),
+      EcCurve::P384 => Some(&digest::SHA384),
+      EcCurve::P521 => Some(&digest::SHA512),
       _ => None,
     }
   }
@@ -284,7 +265,7 @@ impl EcCurve {
 impl fmt::Display for BBKey {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     /* Use kid for keys that have it, otherwise no_kid */
-    let kid = self.kid.clone().unwrap_or_else(|| "<no_kid>".to_string());
+    let kid = self.kid.as_deref().unwrap_or("<no_kid>").to_string();
     write!(f, "{}", kid)
   }
 }
@@ -298,66 +279,30 @@ impl BBKey {
   /// * `payload` - the signed data
   /// * `signature` - the signature to verify
   ///
-  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<bool> {
+  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<()> {
+    if matches!(
+      (&self.alg, &self.crv),
+      (KeyAlgorithm::EdDSA, Some(EcCurve::Ed448))
+    ) {
+      return Err(BBError::Other(format!(
+        "Unsupported key algorithm for key '{}'",
+        *self
+      )));
+    }
+
     match self.alg {
-      KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512 => {
-        let mut verifier = self.verifier()?;
-        verifier
-          .update(payload)
-          .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
-
-        match verifier
-          .verify(signature)
-          .map_err(|e| BBError::Other(format!("Failed to check RSA signature: {:?}", e)))?
-        {
-          true => Ok(true),
-          false => Err(BBError::SignatureInvalid()),
-        }
-      }
-
-      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => {
-        let ec_key = self.key.ec_key().map_err(|e| {
-          BBError::Other(format!("Failed to extract EC key from public key: {:?}", e))
-        })?;
-
-        let sig_len = signature.len();
-        if sig_len != self.alg.signature_length() {
-          return Err(BBError::SignatureInvalid());
-        }
-
-        /* Create Ecdsa signature from signature bytes */
-        let m = signature.len() / 2;
-
-        let r = BigNum::from_slice(&signature[..m])
-          .map_err(|e| BBError::Other(format!("Bignum error: {}", e)))?;
-        let s = BigNum::from_slice(&signature[m..sig_len])
-          .map_err(|e| BBError::Other(format!("Bignum error: {}", e)))?;
-        let sig = EcdsaSig::from_private_components(r, s)
-          .map_err(|e| BBError::Other(format!("Could not create Ecdsa Signature: {}", e)))?;
-
-        /* calculate signature from payload */
-        let digest = self
-          .alg
-          .message_digest()
-          .ok_or_else(|| BBError::Other("Unknown algorithm digest".to_string()))?;
-        let hash = hash(digest, payload)
-          .map_err(|e| BBError::Other(format!("Failed to hash payload: {}", e)))?;
-
-        Ok(
-          sig
-            .verify(&hash, &ec_key)
-            .map_err(|e| BBError::Other(format!("Failed to verify EC signature: {}", e)))?,
-        )
-      }
-
-      KeyAlgorithm::EdDSA => {
-        let mut verifier = Verifier::new_without_digest(&self.key)
-          .map_err(|e| BBError::Other(format!("Cannot get verifier for EdDSA: {}", e)))?;
-        Ok(
-          verifier
-            .verify_oneshot(signature, payload)
-            .map_err(|e| BBError::Other(format!("Failed to verify EdDSA signature: {}", e)))?,
-        )
+      KeyAlgorithm::RS256
+      | KeyAlgorithm::RS384
+      | KeyAlgorithm::RS512
+      | KeyAlgorithm::ES256
+      | KeyAlgorithm::ES384
+      | KeyAlgorithm::EdDSA => {
+        let key =
+          ring::signature::UnparsedPublicKey::new(self.alg.verification(), self.key.as_ref());
+        let res = key
+          .verify(payload, signature)
+          .map_err(|_| BBError::SignatureInvalid);
+        return res;
       }
 
       _ => Err(BBError::Other(format!(
@@ -366,85 +311,10 @@ impl BBKey {
       ))),
     }
   }
-
-  ///
-  /// Return an OpenSSL verifier using this key.
-  ///
-  pub fn verifier(&self) -> BBResult<Verifier> {
-    let verifier = match self.kty {
-      KeyType::RSA => {
-        /* Get message digest for the algorithm used */
-        let message_digest = self.alg.message_digest().ok_or_else(|| {
-          BBError::Other(format!("Failed to get message digest for key '{}'.", &self))
-        })?;
-        /* create verifier */
-        Verifier::new(message_digest, &self.key).map_err(|e| {
-          BBError::Other(format!(
-            "Failed to create verifier for RSA key '{}': {:?}",
-            &self, e
-          ))
-        })?
-      }
-
-      KeyType::EC => {
-        /* EC keys do not use a verifier */
-        return Err(BBError::Other("EC key has no verifier".to_string()));
-      }
-
-      KeyType::OKP => {
-        /* Ed does not use a message digest */
-        Verifier::new_without_digest(&self.key).map_err(|e| {
-          BBError::Other(format!(
-            "Failed to create verifier for Ed key '{}': {:?}",
-            &self, e
-          ))
-        })?
-      }
-
-      KeyType::Unsupported => {
-        return Err(BBError::Other(format!(
-          "Unsupported key type for key '{}'",
-          &self
-        )));
-      }
-    };
-
-    Ok(verifier)
-  }
 }
 
 ///
-/// Return config instance for base64 decoding of JWTs.
-///
-// pub fn base64_config() -> base64::Config {
-//   base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
-// }
-
-///
-/// Create a BigNum from a base64 encoded string.
-///
-/// # Arguments
-///
-/// * `b64` - base64 encoded binary value; if None, an error is returned
-/// * `error_context` - a string to include in error messages
-///
-fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
-  let bytes = BASE64_ENGINE
-    .decode(b64)
-    .map_err(|e| BBError::DecodeError(format!("{error_context}: '{:?}'", e)))?;
-
-  BigNum::from_slice(&bytes).map_err(|e| {
-    BBError::DecodeError(format!(
-      "Failed to create number from b64 string ({error_context}): {}",
-      e
-    ))
-  })
-}
-
-///
-/// Create an OpenSSL-backed public key from a JWK.
-///
-/// This basically converts a JWK to a openssl::Pkey<Public>, wrapper in a [`BBKey`] struct.
+/// Create a [`BBKey`] from a JWK.
 ///
 /// # Arguments
 ///
@@ -455,45 +325,60 @@ fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
 /// A PublicKey instance.
 ///
 fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
-  let kid = if jwk.kid.is_some() {
-    jwk.kid.as_ref().unwrap()
-  } else {
-    "<no_kid>"
-  };
+  let kid = jwk.kid.as_deref().unwrap_or("<no_kid>").to_string();
 
   let key = match jwk.kty {
+    // TODO tests that cover more than loading?
     KeyType::EC => {
-      /* get the curve name/id */
-      let nid = if jwk.crv.is_some() {
-        jwk.crv.as_ref().unwrap().nid()
-      } else {
-        None
+      /* ensure crv field */
+      if jwk.crv.is_none() {
+        return Err(BBError::JWKInvalid(format!(
+          "Missing 'crv' field for EC key '{kid}'"
+        )));
       }
-      .ok_or_else(|| {
-        BBError::JWKInvalid(format!(
-          "Missing or unsupported 'crv' field for EC key '{kid}'"
-        ))
-      })?;
-      let group = EcGroup::from_curve_name(nid).map_err(|e| {
-        BBError::JWKInvalid(format!(
-          "Cannot create EcGroup from nid {:?} for key {kid}: {}",
-          nid, e
-        ))
-      })?;
 
-      /* get point coordinates */
+      /* ensure point coordinates */
       if jwk.x.is_none() || jwk.y.is_none() {
         return Err(BBError::JWKInvalid(format!(
           "Missing x or y for EC key '{kid}'"
         )));
       }
-      let x = bignum_from_base64(jwk.x.as_ref().unwrap(), "EC x")?;
-      let y = bignum_from_base64(jwk.y.as_ref().unwrap(), "EC y")?;
 
-      let ec_key = EcKey::from_public_key_affine_coordinates(&group, &x, &y)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create EcKey for {kid}': {}", e)))?;
-      PKey::from_ec_key(ec_key)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/EC for {kid}': {}", e)))?
+      let x = BASE64_ENGINE.decode(jwk.x.as_ref().unwrap())?;
+      let y = BASE64_ENGINE.decode(jwk.y.as_ref().unwrap())?;
+
+      let res = match jwk.crv.as_ref().unwrap() {
+        EcCurve::P256 => p256::EncodedPoint::from_affine_coordinates(
+          GenericArray::from_slice(&x),
+          GenericArray::from_slice(&y),
+          false,
+        )
+        .to_bytes()
+        .into(),
+        EcCurve::SECP256K1 => {
+          return Err(BBError::JWKInvalid(format!(
+            "Unsupported curve: SECP256K1 for EC key '{kid}'"
+          )))
+        }
+        EcCurve::P384 => p384::EncodedPoint::from_affine_coordinates(
+          GenericArray::from_slice(&x),
+          GenericArray::from_slice(&y),
+          false,
+        )
+        .to_bytes()
+        .into(),
+        EcCurve::P521 => {
+          return Err(BBError::JWKInvalid(format!(
+            "Unsupported curve: P521 for EC key '{kid}'"
+          )))
+        }
+        // TODO is this a possible code path? I think not (AU)
+        EcCurve::Ed25519 => x,
+        // TODO is this a possible code path? I think not (AU)
+        EcCurve::Ed448 => x,
+      };
+
+      res
     }
 
     KeyType::RSA => {
@@ -502,12 +387,21 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
           "Missing n or e for RSA key '{kid}'"
         )));
       }
-      let n = bignum_from_base64(jwk.n.as_ref().unwrap(), "RSA n")?;
-      let e = bignum_from_base64(jwk.e.as_ref().unwrap(), "RSA e")?;
-      let rsa_key = Rsa::from_public_components(n, e)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create RSA key from {kid}: {}", e)))?;
-      PKey::from_rsa(rsa_key)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from {kid}: {}", e)))?
+
+      let n = BASE64_ENGINE.decode(jwk.n.as_ref().unwrap())?;
+      let e = BASE64_ENGINE.decode(jwk.e.as_ref().unwrap())?;
+
+      let n = der::asn1::UintRef::new(&n)
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid n for RSA key '{kid}'")))?;
+      let e = der::asn1::UintRef::new(&e)
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid e for RSA key '{kid}'")))?;
+      let key = pkcs1::RsaPublicKey {
+        modulus: n,
+        public_exponent: e,
+      };
+      key
+        .to_der()
+        .map_err(|_| BBError::JWKInvalid(format!("DER encoding failed for RSA key '{kid}'")))?
     }
 
     KeyType::OKP => {
@@ -521,19 +415,15 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
       let bytes = BASE64_ENGINE
         .decode(jwk.x.as_ref().unwrap())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
-      let curve_id = match jwk.crv {
-        Some(EcCurve::Ed25519) => Id::ED25519,
-        Some(EcCurve::Ed448) => Id::ED448,
-        None => Id::ED25519,
+      match jwk.crv {
+        // `None` assumes `Ed25519`
+        Some(EcCurve::Ed25519) | Some(EcCurve::Ed448) | None => bytes,
         _ => {
           return Err(BBError::JWKInvalid(format!(
             "Invalid curve for OKP key {kid}"
           )));
         }
-      };
-
-      PKey::public_key_from_raw_bytes(&bytes, curve_id)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to read EdDSA key for {kid}: {}", e)))?
+      }
     }
 
     _ => {
@@ -545,7 +435,7 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
 
   Ok(BBKey {
     kid: jwk.kid.clone(),
-    key,
+    key: key.into(),
     kty: jwk.kty.clone(),
     crv: jwk.crv.clone(),
     alg: jwk.alg.clone().unwrap_or_default(),
@@ -662,13 +552,23 @@ impl KeyStore {
   /// * `alg` - algorithm, e.g. [`KeyAlgorithm::RS256`]
   ///
   pub fn add_rsa_pem_key(&self, pem: &str, kid: Option<&str>, alg: KeyAlgorithm) -> BBResult<()> {
-    let rsa = openssl::rsa::Rsa::public_key_from_pem(pem.as_bytes())
+    if !matches!(
+      alg,
+      KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512
+    ) {
+      return Err(BBError::Other("Invalid algorithm for rsa key".to_string()));
+    }
+    let pem_key = PemEncodedKey::new(pem.as_bytes())
       .map_err(|e| BBError::Other(format!("Could not read RSA pem: {:?}", e)))?;
+
+    let key = pem_key
+      .as_rsa_key()
+      .map_err(|e| BBError::Other(format!("Failed to create RSA key from PEM: {:?}", e)))?
+      .to_owned();
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
-      key: PKey::from_rsa(rsa)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from PEM: {}", e)))?,
+      key: key.into(),
       kty: KeyType::RSA,
       crv: None,
       alg,
@@ -701,21 +601,35 @@ impl KeyStore {
     curve: EcCurve,
     alg: KeyAlgorithm,
   ) -> BBResult<()> {
-    let key = PKey::public_key_from_pem(pem.as_bytes())
-      .map_err(|e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e)))?;
-
     /* determine key type */
     let kty = match alg {
       KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => KeyType::EC,
       KeyAlgorithm::EdDSA => KeyType::OKP,
       _ => {
-        return Err(BBError::Other("Invalid algorithm for ec key".to_string()));
+        return Err(BBError::Other(
+          "Invalid algorithm for EdDSA/EC key".to_string(),
+        ));
       }
+    };
+
+    let pem_key = PemEncodedKey::new(pem.as_bytes())
+      .map_err(|e| BBError::Other(format!("Could not read PEM EdDSA/EC pub key: {:?}", e)))?;
+
+    // Decode PEM content to DER. This is what `ring` (verification algorithm implementation) expects.
+    // However: currently, ring does not support Ed448.
+    // The `ed448_rust` crate expects a different format (`num_bigint::BigInt`, little-endian).
+    let key_data = match alg {
+      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => pem_key
+        .as_ec_public_key()
+        .map_err(|e| BBError::Other(format!("PEM does not contain an EC public key: {:?}", e)))?,
+      _ => pem_key
+        .as_ed_public_key()
+        .map_err(|e| BBError::Other(format!("PEM does not contain an Ed public key: {:?}", e)))?,
     };
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
-      key,
+      key: PublicKey(key_data.to_owned()),
       kty,
       alg,
       crv: Some(curve),
@@ -883,7 +797,7 @@ impl KeyStore {
       .write()
       .map_err(|e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e)))?;
 
-    /* convert all keys to OpenSSL types */
+    /* convert all keys to internal type and add them to the store */
     for key in keyset.keys {
       keys.push(pubkey_from_jwk(&key)?);
     }

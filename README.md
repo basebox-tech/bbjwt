@@ -23,7 +23,7 @@ And that's it.
 
 Besides, we designed bbjwt to meet the following requirements:
 
-* No unsecure code (openssl crate is not considered unsecure by us :-) )
+* No unsecure code
 * Never panic
 * No lifetime specifiers in the API
 * Asynchronous
@@ -40,20 +40,13 @@ their usage in JWKs, JWTs etc.
 | RSA384  | RSA        | RS384      |                   |
 | RSA512  | RSA        | RS512      |                   |
 | ES256   | EC         | ES256      | P-256             |
-| ES256   | EC         | ES256      | secp256k1         |
 | ES384   | EC         | ES384      | P-384             |
-| ES512   | EC         | ES512      | P-521 *(no typo)* |
 | Ed25519 | OKP        | EdDSA      | Ed25519           |
-| Ed448   | OKP        | EdDSA      | Ed448             |
 
 Encrypted JWTs are not supported.
 
 BTW, if you have the choice, use Ed25519. It is safe and fast.
 
-## Building
-
-bbjwt uses the openssl crate, so OpenSSL development libraries are required to build bbjwt. See
-the [openssl crate's](https://docs.rs/openssl/latest/openssl/) documentation for details.
 
 ## Why yet another Rust JWT validation lib?
 
@@ -70,7 +63,7 @@ a local buffer/file.
 
 See the following example:
 
-```rust  no_run
+```rust no_run
 use bbjwt::KeyStore;
 
 #[tokio::main]

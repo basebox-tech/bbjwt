@@ -9,14 +9,12 @@
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
-#[macro_use]
-extern crate serde_derive;
-
 use base64::Engine;
 pub use errors::{BBError, BBResult};
 pub use keystore::KeyStore;
 pub use keystore::{EcCurve, KeyAlgorithm};
 
+use serde::Deserialize;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use keystore::BBKey;
@@ -26,6 +24,7 @@ use keystore::BASE64_ENGINE;
 
 pub mod errors;
 pub mod keystore;
+mod pem;
 
 /* --- types ------------------------------------------------------------------------------------ */
 
@@ -203,9 +202,8 @@ pub async fn validate_jwt(
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
 
   /* First, we verify the signature. */
-  if !check_jwt_signature(&parts, &pubkey)? {
-    return Err(BBError::SignatureInvalid());
-  }
+  // TODO this swallows the base64 decode error
+  check_jwt_signature(&parts, &pubkey).map_err(|_| BBError::SignatureInvalid)?;
 
   /* decode the payload so we can verify its contents */
   let payload_json = BASE64_ENGINE.decode(parts[1])?;
@@ -332,9 +330,9 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
 /// # Arguments
 ///
 /// * `jwt_parts` - JWT split by '.'; must be a vector of 3 strings
-/// * `verifier` - The OpenSSL verifier to use
+/// * `pubkey` - The key to use for verification
 ///
-fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
+fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<()> {
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
