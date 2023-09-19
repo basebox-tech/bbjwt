@@ -2,7 +2,6 @@
 //! Error definitions for bbjwt.
 //!
 //! Copyright (c) 2022 basebox GmbH
-//!
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
@@ -14,7 +13,6 @@ pub type BBResult<T> = Result<T, BBError>;
 
 ///
 /// Errors used in bbjwt
-///
 #[allow(dead_code)]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BBError {
@@ -66,7 +64,6 @@ pub enum BBError {
 impl BBError {
   ///
   /// Return name for each error variant.
-  ///
   pub fn name(&self) -> String {
     match self {
       Self::NetworkError(..) => "NetworkError".to_string(),

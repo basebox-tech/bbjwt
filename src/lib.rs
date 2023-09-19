@@ -12,15 +12,12 @@
 #[macro_use]
 extern crate serde_derive;
 
-use base64::Engine;
-pub use errors::{BBError, BBResult};
-pub use keystore::KeyStore;
-pub use keystore::{EcCurve, KeyAlgorithm};
-
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use keystore::BBKey;
-use keystore::BASE64_ENGINE;
+use base64::Engine;
+pub use errors::{BBError, BBResult};
+use keystore::{BBKey, BASE64_ENGINE};
+pub use keystore::{EcCurve, KeyAlgorithm, KeyStore};
 
 /* --- mods ------------------------------------------------------------------------------------- */
 
@@ -38,7 +35,6 @@ pub mod keystore;
 /// For a list of claims see <https://www.iana.org/assignments/jwt/jwt.xhtml#claims>.
 ///
 /// Note that this enum does not contain a `Signature` variant as the signature is always verified.
-///
 pub enum ValidationStep {
   /// "iss" claim must have certain String value.
   Issuer(String),
@@ -57,10 +53,9 @@ pub enum ValidationStep {
 ///
 /// All claims defined in a JWT.
 ///
-/// This is created and returned to the caller upon successful validation. The claims present do vary,
-/// and the caller knows best what fields to expect, so this struct simply contains a copy of the parsed
-/// JSON fields.
-///
+/// This is created and returned to the caller upon successful validation. The claims present do
+/// vary, and the caller knows best what fields to expect, so this struct simply contains a copy of
+/// the parsed JSON fields.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct JWTClaims {
@@ -69,7 +64,7 @@ pub struct JWTClaims {
   /// Claims (fields) found in the JWT. What fields are present depends on the purpose of
   /// the JWT. For OpenID Connect ID tokens see
   /// [here](https://openid.net/specs/openid-connect-core-1_0.html#IDToken)
-  pub claims: serde_json::Value,
+  pub claims:  serde_json::Value,
 }
 
 ///
@@ -84,7 +79,6 @@ pub struct JWTClaims {
 /// Instead, the public keys have to come from a trusted, different source. The trust comes from
 /// verifying the `iss` field of the header.
 /// I have no idea if `jku` and/or `jwk` fields are actually being used...
-///
 #[derive(Deserialize)]
 struct JOSEHeader {
   /// Algorithm
@@ -95,7 +89,6 @@ struct JOSEHeader {
 
 ///
 /// Audience enum; supports a single or multiple audiences.
-///
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Audience {
@@ -105,14 +98,13 @@ enum Audience {
 
 ///
 /// Claims that can be subject to validation.
-///
 #[derive(Deserialize)]
 struct ValidationClaims {
-  iss: Option<String>,
-  sub: Option<String>,
-  exp: Option<u64>,
-  aud: Option<Audience>,
-  nonce: Option<String>,
+  iss:    Option<String>,
+  sub:    Option<String>,
+  exp:    Option<u64>,
+  aud:    Option<Audience>,
+  nonce:  Option<String>,
   groups: Option<Vec<String>>,
 }
 
@@ -137,17 +129,14 @@ struct ValidationClaims {
 /// # Returns
 ///
 /// A vector of ValidationStep variants that can be passed into the [`validate_jwt`] function.
-///
 pub fn default_validations(
   issuer: &str,
   audience: Option<&str>,
   nonce: Option<&str>,
 ) -> Vec<ValidationStep> {
   /* Create vector of bare minimum validations */
-  let mut validations = vec![
-    ValidationStep::Issuer(issuer.to_string()),
-    ValidationStep::NotExpired,
-  ];
+  let mut validations =
+    vec![ValidationStep::Issuer(issuer.to_string()), ValidationStep::NotExpired];
 
   if let Some(audience) = audience {
     validations.push(ValidationStep::Audience(audience.to_string()));
@@ -174,7 +163,6 @@ pub fn default_validations(
 /// # Returns
 ///
 /// All claims found in the JWT on success.
-///
 pub async fn validate_jwt(
   jwt: &str,
   validation_steps: &Vec<ValidationStep>,
@@ -184,9 +172,7 @@ pub async fn validate_jwt(
    * HEADER.CLAIMS.SIGNATURE */
   let parts: Vec<&str> = jwt.splitn(3, '.').collect();
   if parts.len() != 3 {
-    return Err(BBError::TokenInvalid(
-      "Could not split token in 3 parts.".to_string(),
-    ));
+    return Err(BBError::TokenInvalid("Could not split token in 3 parts.".to_string()));
   }
 
   /* Get the JOSE header */
@@ -194,7 +180,8 @@ pub async fn validate_jwt(
   let kid_hdr: JOSEHeader =
     serde_json::from_slice(&hdr_json).map_err(|e| BBError::JSONError(format!("{:?}", e)))?;
 
-  /* Deny JWTs with no algorithm; see [here](https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1) */
+  /* Deny JWTs with no algorithm;
+   * see [here](https://www.rfc-editor.org/rfc/rfc8725.html#section-2.1) */
   if kid_hdr.alg == KeyAlgorithm::Other {
     return Err(BBError::TokenInvalid("Unsupported algorithm".to_string()));
   }
@@ -230,7 +217,7 @@ pub async fn validate_jwt(
   /* Success! */
   Ok(JWTClaims {
     headers: serde_json::from_slice(&hdr_json)?,
-    claims: serde_json::from_slice(&payload_json)?,
+    claims:  serde_json::from_slice(&payload_json)?,
   })
 }
 
@@ -247,7 +234,6 @@ pub async fn validate_jwt(
 /// # Returns
 ///
 /// None on success or an error string on validation error.
-///
 fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<String> {
   match step {
     ValidationStep::Audience(aud) => {
@@ -255,10 +241,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
         match claims_aud {
           Audience::Single(single) => {
             if single != aud {
-              return Some(format!(
-                "'aud' does not match; expected '{}', got '{}'",
-                aud, single
-              ));
+              return Some(format!("'aud' does not match; expected '{}', got '{}'", aud, single));
             }
           }
           Audience::Multi(multi) => {
@@ -278,10 +261,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
     ValidationStep::Issuer(iss) => {
       if let Some(claims_iss) = &claims.iss {
         if claims_iss != iss {
-          return Some(format!(
-            "'iss' does not match; expected '{}', got '{}'",
-            iss, claims_iss
-          ));
+          return Some(format!("'iss' does not match; expected '{}', got '{}'", iss, claims_iss));
         }
       } else {
         return Some("'iss' is missing".to_string());
@@ -301,9 +281,7 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
     ValidationStep::NotExpired => {
       if let Some(exp) = &claims.exp {
         /* get current time; if this fails, we can assume a wrong time setting and panic */
-        let now = SystemTime::now()
-          .duration_since(UNIX_EPOCH)
-          .expect("System time is wrong.");
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("System time is wrong.");
         if Duration::from_secs(*exp) < now {
           return Some("Token has expired.".to_string());
         }
@@ -333,14 +311,12 @@ fn validate_claim(claims: &ValidationClaims, step: &ValidationStep) -> Option<St
 ///
 /// * `jwt_parts` - JWT split by '.'; must be a vector of 3 strings
 /// * `verifier` - The OpenSSL verifier to use
-///
 fn check_jwt_signature(jwt_parts: &[&str], pubkey: &BBKey) -> BBResult<bool> {
   /* first 2 parts are JWT data */
   let jwt_data = format!("{}.{}", jwt_parts[0], jwt_parts[1]);
   /* signature is the 3rd part */
-  let sig = BASE64_ENGINE
-    .decode(jwt_parts[2])
-    .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
+  let sig =
+    BASE64_ENGINE.decode(jwt_parts[2]).map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
 
   pubkey.verify_signature(jwt_data.as_bytes(), &sig)
 }
@@ -355,14 +331,13 @@ mod tests {
 
   ///
   /// Return empty validations.
-  ///
   fn empty_validations() -> ValidationClaims {
     ValidationClaims {
-      aud: None,
-      iss: None,
-      nonce: None,
-      exp: None,
-      sub: None,
+      aud:    None,
+      iss:    None,
+      nonce:  None,
+      exp:    None,
+      sub:    None,
       groups: None,
     }
   }
@@ -380,10 +355,7 @@ mod tests {
     let step = ValidationStep::Audience("test2".to_string());
     if let Some(err_str) = validate_claim(&claims, &step) {
       /* assert we get a detailed error string */
-      assert_eq!(
-        err_str,
-        "'aud' does not match; expected 'test2', got 'test'"
-      );
+      assert_eq!(err_str, "'aud' does not match; expected 'test2', got 'test'");
     } else {
       panic!("Invalid aud did not fail validation");
     }
@@ -402,10 +374,7 @@ mod tests {
     let step = ValidationStep::Issuer("test2".to_string());
     if let Some(err_str) = validate_claim(&claims, &step) {
       /* assert we get a detailed error string */
-      assert_eq!(
-        err_str,
-        "'iss' does not match; expected 'test2', got 'test'"
-      );
+      assert_eq!(err_str, "'iss' does not match; expected 'test2', got 'test'");
     } else {
       panic!("Invalid iss did not fail validation");
     }

@@ -1,1 +1,51 @@
+# source of truth: the most recent version of the formatting configuration can be found at
+# https://gitea.basebox.health/basebox/broker/issues/24
+# 
+# running:
+# make sure to run with nightly rustfmt, e.g. `cargo +nightly fmt` 
+
 tab_spaces = 2
+
+# I can't rely on contributors using .editorconfig
+newline_style = "Unix"
+# require the shorthand instead of it being optional
+use_field_init_shorthand = true
+# outdated default — `?` was unstable at the time
+# additionally the `try!` macro is deprecated now
+use_try_shorthand = true
+# Max to use the 100 char width for everything or Default. See https://rust-lang.github.io/rustfmt/?version=v1.4.38&search=#use_small_heuristics
+use_small_heuristics = "Max"
+
+# Unstable features below
+unstable_features = true
+version = "Two"
+# code can be 100 characters, why not comments?
+wrap_comments = true
+comment_width = 100
+# force contributors to follow the formatting requirement
+error_on_line_overflow = true
+
+# next 4: why not?
+format_code_in_doc_comments = true
+format_macro_bodies = true
+format_macro_matchers = true
+format_strings = true
+# better grepping
+imports_granularity = "Module"
+# quicker manual lookup
+group_imports = "StdExternalCrate"
+# why use an attribute if a normal doc comment would suffice?
+normalize_doc_attributes = true
+# trailing semicolon for explicit returns
+trailing_semicolon = true
+struct_field_align_threshold = 20
+struct_lit_single_line = false
+single_line_if_else_max_width = 0
+single_line_let_else_max_width = 0
+empty_item_single_line = false
+brace_style = "PreferSameLine"
+
+# Some wanted formatting which rustfmt dislikes should be left alone, e.g.
+# I want to decide when and if I wrap chained methods.
+error_on_unformatted = false
+

@@ -27,14 +27,12 @@ thread_local! {
 
 ///
 /// Store the current test's ID in the thread local RefCell
-///
 pub fn set_test_id(test_id: &'static str) {
   TEST_ID.with(|id| *id.borrow_mut() = test_id);
 }
 
 ///
 /// Retrieve current test's ID from thread local RefCell
-///
 pub fn get_test_id() -> &'static str {
   TEST_ID.with(|id| *id.borrow())
 }
@@ -43,7 +41,6 @@ pub fn get_test_id() -> &'static str {
 
 ///
 /// Log error; syntax is the same as for println!()
-///
 #[macro_export]
 macro_rules! log_error {
   ($($args:tt)+) => {
@@ -53,7 +50,6 @@ macro_rules! log_error {
 
 ///
 /// Log info; syntax is the same as for println!()
-///
 #[macro_export]
 macro_rules! log_info {
   ($($args:tt)+) => {
@@ -63,7 +59,6 @@ macro_rules! log_info {
 
 ///
 /// Log debug; syntax is the same as for println!()
-///
 #[macro_export]
 macro_rules! log_debug {
   ($($args:tt)+) => {
@@ -73,7 +68,6 @@ macro_rules! log_debug {
 
 ///
 /// Internal log initialization.
-///
 fn _init_log() {
   color_backtrace::install();
   env_logger::init();
@@ -85,7 +79,6 @@ fn _init_log() {
 /// # Arguments
 ///
 /// * `test_id` - name/id of the current test.
-///
 pub fn init_log(test_id: &'static str) {
   INIT_LOG.call_once(_init_log);
   set_test_id(test_id);
@@ -101,14 +94,10 @@ pub fn init_log(test_id: &'static str) {
 /// # Returns
 ///
 /// Absolute path to the asset file.
-///
 pub fn path_to_asset_file(asset_name: &str) -> String {
-  let path = Path::new(
-    env::var("CARGO_MANIFEST_DIR")
-      .expect("CARGO_MANIFEST_DIR not set")
-      .as_str(),
-  )
-  .join(format!("tests/assets/{}", asset_name));
+  let path =
+    Path::new(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set").as_str())
+      .join(format!("tests/assets/{}", asset_name));
 
   String::from(path.to_str().unwrap())
 }
