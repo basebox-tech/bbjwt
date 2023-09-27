@@ -14,6 +14,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Error(Box<ErrorKind>);
 
+#[allow(dead_code)]
 impl Error {
   /// Return the specific type of this error.
   pub fn kind(&self) -> &ErrorKind {
@@ -33,6 +34,7 @@ impl Error {
 /// (Otherwise, adding a new variant could break existing code.)
 #[non_exhaustive]
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum ErrorKind {
   /// When a token doesn't have a valid JWT shape
   InvalidToken,

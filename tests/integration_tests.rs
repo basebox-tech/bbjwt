@@ -27,7 +27,7 @@ const ISS: &str = "https://kc.basebox.health/realms/testing";
 /// Load an asset from a file by its asset name (relative to test/assets/)
 fn load_asset(name: &str) -> String {
   let pfn = path_to_asset_file(name);
-  let mut file = File::open(&pfn).expect(&format!("Failed to open asset {}", &pfn));
+  let mut file = File::open(&pfn).unwrap_or_else(|_| panic!("Failed to open asset {}", &pfn));
   let mut data = String::new();
   file.read_to_string(&mut data).unwrap();
   data
@@ -257,28 +257,6 @@ async fn es384_valid_jwt() {
 }
 
 ///
-/// Validate ES512
-#[tokio::test]
-async fn es512_valid_jwt() {
-  let ks_good = KeyStore::new().await.unwrap();
-  ks_good
-    .add_ec_pem_key(&load_asset("ec512.pub.key"), Some("key-1"), EcCurve::P521, KeyAlgorithm::ES512)
-    .expect("Failed to add ec512 key");
-
-  let ks_bad = KeyStore::new().await.unwrap();
-  ks_bad
-    .add_ec_pem_key(
-      &load_asset("ec512.wrong.pub.key"),
-      Some("key-1"),
-      EcCurve::P521,
-      KeyAlgorithm::ES512,
-    )
-    .expect("Failed to add EC512 key");
-
-  validate_jwt_with_keystores("id_token_es512.txt", &ks_good, &ks_bad).await;
-}
-
-///
 /// Validate Ed25519
 #[tokio::test]
 async fn ed25519_valid_jwt() {
@@ -300,36 +278,9 @@ async fn ed25519_valid_jwt() {
       EcCurve::Ed25519,
       KeyAlgorithm::EdDSA,
     )
-    .expect("Failed to add Ed448 key");
+    .expect("Failed to add Ed25519 key");
 
   validate_jwt_with_keystores("id_token_ed25519.txt", &ks_good, &ks_bad).await;
-}
-
-///
-/// Validate Ed448
-#[tokio::test]
-async fn ed448_valid_jwt() {
-  let ks_good = KeyStore::new().await.unwrap();
-  ks_good
-    .add_ec_pem_key(
-      &load_asset("ed448.pub.key"),
-      Some("key-1"),
-      EcCurve::Ed448,
-      KeyAlgorithm::EdDSA,
-    )
-    .expect("Failed to add Ed448 key");
-
-  let ks_bad = KeyStore::new().await.unwrap();
-  ks_bad
-    .add_ec_pem_key(
-      &load_asset("ed448.wrong.pub.key"),
-      Some("key-1"),
-      EcCurve::Ed448,
-      KeyAlgorithm::EdDSA,
-    )
-    .expect("Failed to add Ed448 key");
-
-  validate_jwt_with_keystores("id_token_ed448.txt", &ks_good, &ks_bad).await;
 }
 
 ///

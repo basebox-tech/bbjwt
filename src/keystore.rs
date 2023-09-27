@@ -283,8 +283,7 @@ impl BBKey {
       | KeyAlgorithm::EdDSA => {
         let key =
           ring::signature::UnparsedPublicKey::new(self.alg.verification(), self.key.as_ref());
-        let res = key.verify(payload, signature).map_err(|_| BBError::SignatureInvalid);
-        return res;
+        key.verify(payload, signature).map_err(|_| BBError::SignatureInvalid)
       }
 
       _ => Err(BBError::Other(format!("Unsupported key algorithm for key '{}'", *self))),
@@ -306,7 +305,6 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
   let kid = jwk.kid.as_deref().unwrap_or("<no_kid>").to_string();
 
   let key = match jwk.kty {
-    // TODO tests that cover more than loading?
     KeyType::EC => {
       /* ensure crv field */
       if jwk.crv.is_none() {
@@ -342,12 +340,14 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
         .to_bytes()
         .into(),
         EcCurve::P521 => {
-          return Err(BBError::JWKInvalid(format!("Unsupported curve: P521 for EC key '{kid}'")));
+          return Err(BBError::JWKInvalid(format!("Unsupported curve P521 for EC key '{kid}'")));
         }
-        // TODO is this a possible code path? I think not (AU)
-        EcCurve::Ed25519 => x,
-        // TODO is this a possible code path? I think not (AU)
-        EcCurve::Ed448 => x,
+        EcCurve::Ed25519 => {
+          return Err(BBError::JWKInvalid(format!("Unsupported curve Ed25519 for EC key '{kid}'")));
+        }
+        EcCurve::Ed448 => {
+          return Err(BBError::JWKInvalid(format!("Unsupported curve Ed448 for EC key '{kid}'")));
+        }
       };
 
       res
@@ -941,7 +941,7 @@ mod tests {
   /// Test for `assigned_header_value` function
   #[test]
   fn test_header_value_parser() {
-    let test_strings = vec![
+    let test_strings = [
       "oriuehgueohgeor depp = 3485975dd",
       "depp=1,fellow",
       "depp = 22-dude",

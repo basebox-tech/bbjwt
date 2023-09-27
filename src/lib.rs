@@ -189,8 +189,7 @@ pub async fn validate_jwt(
   let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
 
   /* First, we verify the signature. */
-  // TODO this swallows the base64 decode error
-  check_jwt_signature(&parts, &pubkey).map_err(|_| BBError::SignatureInvalid)?;
+  check_jwt_signature(&parts, &pubkey)?;
 
   /* decode the payload so we can verify its contents */
   let payload_json = BASE64_ENGINE.decode(parts[1])?;

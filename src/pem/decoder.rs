@@ -58,7 +58,7 @@ impl PemEncodedKey {
           Err(_) => return Err(ErrorKind::InvalidKeyFormat.into()),
         };
 
-        match content.tag().as_ref() {
+        match content.tag() {
           // This handles a PKCS#1 RSA Private key
           "RSA PRIVATE KEY" => Ok(PemEncodedKey {
             content:  content.into_contents(),
@@ -125,6 +125,7 @@ impl PemEncodedKey {
   }
 
   /// Can only be PKCS8
+  #[allow(dead_code)]
   pub fn as_ec_private_key(&self) -> Result<&[u8]> {
     match self.standard {
       Standard::Pkcs1 => Err(ErrorKind::InvalidKeyFormat.into()),
@@ -136,6 +137,7 @@ impl PemEncodedKey {
   }
 
   /// Can only be PKCS8
+  #[allow(dead_code)]
   pub fn as_ec_public_key(&self) -> Result<&[u8]> {
     match self.standard {
       Standard::Pkcs1 => Err(ErrorKind::InvalidKeyFormat.into()),
@@ -147,6 +149,7 @@ impl PemEncodedKey {
   }
 
   /// Can only be PKCS8
+  #[allow(dead_code)]
   pub fn as_ed_private_key(&self) -> Result<&[u8]> {
     match self.standard {
       Standard::Pkcs1 => Err(ErrorKind::InvalidKeyFormat.into()),
