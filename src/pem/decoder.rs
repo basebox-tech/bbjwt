@@ -42,8 +42,8 @@ enum Classification {
 /// PKCS#8: <https://tools.ietf.org/html/rfc5958>
 #[derive(Debug)]
 pub(crate) struct PemEncodedKey {
-  content: Vec<u8>,
-  asn1: Vec<simple_asn1::ASN1Block>,
+  content:  Vec<u8>,
+  asn1:     Vec<simple_asn1::ASN1Block>,
   pem_type: PemType,
   standard: Standard,
 }
@@ -61,14 +61,14 @@ impl PemEncodedKey {
         match content.tag().as_ref() {
           // This handles a PKCS#1 RSA Private key
           "RSA PRIVATE KEY" => Ok(PemEncodedKey {
-            content: content.into_contents(),
-            asn1: asn1_content,
+            content:  content.into_contents(),
+            asn1:     asn1_content,
             pem_type: PemType::RsaPrivate,
             standard: Standard::Pkcs1,
           }),
           "RSA PUBLIC KEY" => Ok(PemEncodedKey {
-            content: content.into_contents(),
-            asn1: asn1_content,
+            content:  content.into_contents(),
+            asn1:     asn1_content,
             pem_type: PemType::RsaPublic,
             standard: Standard::Pkcs1,
           }),

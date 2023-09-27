@@ -1,7 +1,6 @@
 use std::error::Error as StdError;
-use std::fmt;
-use std::result;
 use std::sync::Arc;
+use std::{fmt, result};
 
 /// A crate private constructor for `Error`.
 pub(crate) fn new_error(kind: ErrorKind) -> Error {
@@ -63,8 +62,8 @@ pub enum ErrorKind {
   InvalidSubject,
   /// When a token’s `nbf` claim represents a time in the future
   ImmatureSignature,
-  /// When the algorithm in the header doesn't match the one passed to `decode` or the encoding/decoding key
-  /// used doesn't match the alg requested
+  /// When the algorithm in the header doesn't match the one passed to `decode` or the
+  /// encoding/decoding key used doesn't match the alg requested
   InvalidAlgorithm,
   /// When the Validation struct does not contain at least 1 algorithm
   MissingAlgorithm,
@@ -139,7 +138,8 @@ impl PartialEq for ErrorKind {
 }
 
 // Equality of ErrorKind is an equivalence relation: it is reflexive, symmetric and transitive.
-impl Eq for ErrorKind {}
+impl Eq for ErrorKind {
+}
 
 impl From<base64::DecodeError> for Error {
   fn from(err: base64::DecodeError) -> Error {
@@ -183,9 +183,6 @@ mod tests {
 
   #[test]
   fn test_error_rendering() {
-    assert_eq!(
-      "InvalidAlgorithmName",
-      Error::from(ErrorKind::InvalidAlgorithmName).to_string()
-    );
+    assert_eq!("InvalidAlgorithmName", Error::from(ErrorKind::InvalidAlgorithmName).to_string());
   }
 }
