@@ -101,7 +101,7 @@ pub enum KeyAlgorithm {
   ES256,
   /// ECDSA using P-384 curve and SHA-384 hash algorithm (optional).
   ES384,
-  /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional).
+  /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional). NOT SUPPORTED since 0.3.0
   ES512,
   /// Edwards Curve DSA
   EdDSA,
@@ -128,6 +128,7 @@ pub enum EcCurve {
   #[serde(rename = "P-521")]
   P521,
   Ed25519,
+  /// Ed448 is unsupported since 0.3.0
   Ed448,
 }
 
