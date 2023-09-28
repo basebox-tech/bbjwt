@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
 ## 0.3.0
-- use native Rust TLS implementation
+- use native Rust for cryptography ([ring](https://github.com/briansmith/ring) crate)
 - dropped support for ES512 and Ed448 signatures (**backwards incompatible change**)
 - return proper error message on invalid keytype/curve combinations
 
