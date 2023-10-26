@@ -582,8 +582,6 @@ impl KeyStore {
     /* the URL must be safe, i.e. either local or https */
     if !is_safe_url(&url) {
       return Err(BBError::URLInvalid("Public keysets must be loaded via a safe URL.".to_string()));
-        "Public keysets must be loaded via https.".to_string(),
-      ));
     }
 
     let mut ks = KeyStore {
