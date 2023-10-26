@@ -26,6 +26,7 @@ use keystore::BASE64_ENGINE;
 
 pub mod errors;
 pub mod keystore;
+pub mod tls_ext;
 
 /* --- types ------------------------------------------------------------------------------------ */
 
