@@ -34,7 +34,8 @@ Besides, we designed bbjwt to meet the following requirements:
 The following table shows all signing algorithms supported by bbjwt, along with some info about
 their usage in JWKs, JWTs etc.
 
-*Note that support for Ed448 and ES512 signatures was dropped on bbjwt 0.3.0.*
+> **Note**
+> Please note that support for Ed448 and ES512 signatures was dropped in bbjwt 0.3.0.*
 
 | Name    | JOSE "kty" | JOSE "alg" | JOSE "curve"      |
 | ------- | ---------- | ---------- | ----------------- |
