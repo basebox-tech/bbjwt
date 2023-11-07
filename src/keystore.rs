@@ -1,8 +1,7 @@
 //!
 //! Keystore and key handling for bbjwt.
 //!
-//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS) as well as
-//! OpenSSL related functionality, e.g. converting JWKs into something OpenSSL can work with.
+//! This file implements handling of Json Web Keys (JWK) and Json Web Keysets (JWKS).
 //!
 //! Keys might have an expiration time; while this implementation supports updating
 //! expired keys by reloading them from the original URL, it does not provide cron-like
@@ -18,28 +17,21 @@
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
-use crate::errors::*;
-use base64::Engine;
-use openssl::ecdsa::EcdsaSig;
 use std::fmt::{self};
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
+
+use base64::Engine;
+use der::Encode;
+use p256::elliptic_curve::generic_array::GenericArray;
+use ring::digest;
+use ring::signature::VerificationAlgorithm;
+use serde::Deserialize;
 use url::Url;
 
+use crate::errors::*;
+use crate::pem::decoder::PemEncodedKey;
 use crate::tls_ext::is_safe_url;
-extern crate base64;
-extern crate openssl;
-extern crate serde;
-extern crate serde_json;
-
-use openssl::bn::BigNum;
-use openssl::ec::{EcGroup, EcKey};
-use openssl::hash::{hash, MessageDigest};
-use openssl::nid::Nid;
-use openssl::pkey::Id;
-use openssl::pkey::{PKey, Public};
-use openssl::rsa::Rsa;
-use openssl::sign::Verifier;
 
 /* --- constants -------------------------------------------------------------------------------- */
 
@@ -54,32 +46,32 @@ pub const BASE64_ENGINE: base64::engine::general_purpose::GeneralPurpose =
 /* --- types ------------------------------------------------------------------------------------ */
 
 ///
-/// A key as we store it in the key store.
-///
-/// This is basically an OpenSSL [`PKey<Public>`] with required fields from the original JWK.
-///
-///
+/// A key as we store it in the key store, modeled after JWK.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct BBKey {
-  /// OpenSSL public key
-  key: PKey<Public>,
   /// Optional key ID from the JWK
   kid: Option<String>,
   /// Key type
   kty: KeyType,
+  /// DER encoded key data
+  key: PublicKey,
+
   /// Curve for elliptic curve algorithms
   crv: Option<EcCurve>,
   /// Hash algorithm
   alg: KeyAlgorithm,
 }
 
+use derive_more::{AsRef, From, Into};
+#[derive(Debug, Clone, From, Into, AsRef)]
+pub struct PublicKey(Vec<u8>);
+
 ///
 /// JWK key type enum
 ///
 /// * <https://www.rfc-editor.org/rfc/rfc7517#section-4.1>
 /// * <https://www.rfc-editor.org/rfc/rfc7518#page-28>
-///
 #[derive(Clone, Debug, Deserialize)]
 #[allow(non_camel_case_types)]
 pub enum KeyType {
@@ -99,7 +91,6 @@ pub enum KeyType {
 ///
 /// A list of values allowed in a JOSE header is here:
 /// <https://www.rfc-editor.org/rfc/rfc7518#section-3.1>
-///
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub enum KeyAlgorithm {
   /// RSASSA-PKCS-v1_5 using SHA-256 hash algorithm (recommended).
@@ -112,7 +103,7 @@ pub enum KeyAlgorithm {
   ES256,
   /// ECDSA using P-384 curve and SHA-384 hash algorithm (optional).
   ES384,
-  /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional).
+  /// ECDSA using P-521 (no typo) curve and SHA-512 hash algorithm (optional). NOT SUPPORTED since 0.3.0
   ES512,
   /// Edwards Curve DSA
   EdDSA,
@@ -126,7 +117,6 @@ pub enum KeyAlgorithm {
 /// Elliptic Curves for EC and Ed/OKP keys
 ///
 /// <https://www.rfc-editor.org/rfc/rfc7518#section-6.2.1.1>
-///
 #[derive(Clone, Debug, Deserialize)]
 pub enum EcCurve {
   /// secp256r1
@@ -140,6 +130,7 @@ pub enum EcCurve {
   #[serde(rename = "P-521")]
   P521,
   Ed25519,
+  /// Ed448 is unsupported since 0.3.0
   Ed448,
 }
 
@@ -148,7 +139,6 @@ pub enum EcCurve {
 ///
 /// This lib supports EC and RSA keys as required by the OpenID Connect spec, see
 /// <https://openid.net/specs/draft-jones-json-web-key-03.html#anchor6>.
-///
 #[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWK {
@@ -159,20 +149,19 @@ pub struct JWK {
   /// Key id; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-4.5)
   pub kid: Option<String>,
   /// RSA modulus; see [here](https://www.rfc-editor.org/rfc/rfc7517#section-9.3)
-  pub n: Option<String>,
+  pub n:   Option<String>,
   /// RSA exponent
-  pub e: Option<String>,
+  pub e:   Option<String>,
   /// EC curve, only for kty="EC"
   pub crv: Option<EcCurve>,
   /// EC x coordinate, only for kty="EC"
-  pub x: Option<String>,
+  pub x:   Option<String>,
   /// EC y coordinate, only for kty="EC"
-  pub y: Option<String>,
+  pub y:   Option<String>,
 }
 
 ///
 /// JSON Web Key Set
-///
 #[derive(Clone, Debug, Deserialize)]
 pub struct JWKS {
   pub keys: Vec<JWK>,
@@ -183,28 +172,28 @@ pub struct JWKS {
 ///
 /// This is basically a thin wrapper around JSON web key sets that adds loading/updating
 /// functionality.
-///
 #[derive(Debug)]
 pub struct KeyStore {
   /// List of keys in this store
-  keyset: RwLock<Vec<BBKey>>,
+  keyset:        RwLock<Vec<BBKey>>,
   /// The URL the key set is loaded from.
-  url: Option<String>,
+  url:           Option<String>,
   /// The time the keys were last loaded from `url`.
-  load_time: Option<SystemTime>,
+  load_time:     Option<SystemTime>,
   /// Reload interval factor; if .7, keys are considered expired if 70% of their lifetime is over.
   /// See [`KeyStore::set_reload_factor`] for more info.
   reload_factor: f64,
   /// Time at which keys should be reloaded.
-  reload_time: Option<SystemTime>,
+  reload_time:   Option<SystemTime>,
 }
 
 impl JWKS {
   ///
   /// Create new empty keyset.
-  ///
   pub fn new() -> Self {
-    JWKS { keys: vec![] }
+    JWKS {
+      keys: vec![]
+    }
   }
 }
 
@@ -217,27 +206,31 @@ impl Default for JWKS {
 impl KeyAlgorithm {
   ///
   /// Return message digest for an algorithm.
-  ///
-  pub fn message_digest(&self) -> Option<MessageDigest> {
-    match *self {
-      KeyAlgorithm::RS256 | KeyAlgorithm::ES256 => Some(MessageDigest::sha256()),
-      KeyAlgorithm::RS384 | KeyAlgorithm::ES384 => Some(MessageDigest::sha384()),
-      KeyAlgorithm::RS512 | KeyAlgorithm::ES512 => Some(MessageDigest::sha512()),
+  pub fn message_digest(&self) -> Option<&'static digest::Algorithm> {
+    match self {
+      KeyAlgorithm::RS256 | KeyAlgorithm::ES256 => Some(&digest::SHA256),
+      KeyAlgorithm::RS384 | KeyAlgorithm::ES384 => Some(&digest::SHA384),
+      KeyAlgorithm::RS512 | KeyAlgorithm::ES512 => Some(&digest::SHA512),
       _ => None,
     }
   }
 
   ///
-  /// Return signature length.
-  ///
-  /// Only applies to elliptic curve algorithms.
-  ///
-  pub fn signature_length(&self) -> usize {
-    match *self {
-      KeyAlgorithm::ES256 => 64,
-      KeyAlgorithm::ES384 => 96,
-      KeyAlgorithm::ES512 => 132,
-      _ => 0,
+  /// Return verification implementation.
+  /// Care must be taken to avoid a mismatch between this function
+  /// and its sole caller [`BBKey::verify_signature`], otherwise it will panic.
+  fn verification(&self) -> &'static dyn VerificationAlgorithm {
+    match self {
+      KeyAlgorithm::RS256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+      KeyAlgorithm::RS384 => &ring::signature::RSA_PKCS1_2048_8192_SHA384,
+      KeyAlgorithm::RS512 => &ring::signature::RSA_PKCS1_2048_8192_SHA512,
+      KeyAlgorithm::ES256 => &ring::signature::ECDSA_P256_SHA256_FIXED,
+      KeyAlgorithm::ES384 => &ring::signature::ECDSA_P384_SHA384_FIXED,
+      // hitting this is a programming error
+      KeyAlgorithm::ES512 => unimplemented!(),
+      KeyAlgorithm::EdDSA => &ring::signature::ED25519,
+      // hitting this is a programming error
+      KeyAlgorithm::Other => unimplemented!(),
     }
   }
 }
@@ -245,7 +238,6 @@ impl KeyAlgorithm {
 impl Default for KeyAlgorithm {
   ///
   /// Return default algorithm - should none be specified.
-  ///
   fn default() -> Self {
     KeyAlgorithm::RS256
   }
@@ -253,30 +245,12 @@ impl Default for KeyAlgorithm {
 
 impl EcCurve {
   ///
-  /// Return message digest for a curve.
-  ///
-  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
-  ///
-  pub fn message_digest(&self) -> Option<MessageDigest> {
-    match *self {
-      EcCurve::P256 => Some(MessageDigest::sha256()),
-      EcCurve::P384 => Some(MessageDigest::sha384()),
-      EcCurve::P521 => Some(MessageDigest::sha512()),
-      _ => None,
-    }
-  }
-
-  ///
-  /// Map elliptic curve variant to its matching OpenSSL NID.
-  ///
-  /// See <https://docs.rs/openssl/latest/openssl/nid/struct.Nid.html>
-  ///
-  pub fn nid(&self) -> Option<Nid> {
-    match *self {
-      EcCurve::SECP256K1 => Some(Nid::SECP256K1),
-      EcCurve::P256 => Some(Nid::X9_62_PRIME256V1),
-      EcCurve::P384 => Some(Nid::SECP384R1),
-      EcCurve::P521 => Some(Nid::SECP521R1),
+  /// Return message digest algorithm for a curve.
+  pub fn message_digest(&self) -> Option<&'static digest::Algorithm> {
+    match self {
+      EcCurve::P256 => Some(&digest::SHA256),
+      EcCurve::P384 => Some(&digest::SHA384),
+      EcCurve::P521 => Some(&digest::SHA512),
       _ => None,
     }
   }
@@ -285,7 +259,7 @@ impl EcCurve {
 impl fmt::Display for BBKey {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     /* Use kid for keys that have it, otherwise no_kid */
-    let kid = self.kid.clone().unwrap_or_else(|| "<no_kid>".to_string());
+    let kid = self.kid.as_deref().unwrap_or("<no_kid>").to_string();
     write!(f, "{}", kid)
   }
 }
@@ -298,154 +272,30 @@ impl BBKey {
   ///
   /// * `payload` - the signed data
   /// * `signature` - the signature to verify
-  ///
-  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<bool> {
+  pub fn verify_signature(&self, payload: &[u8], signature: &[u8]) -> BBResult<()> {
+    if matches!((&self.alg, &self.crv), (KeyAlgorithm::EdDSA, Some(EcCurve::Ed448))) {
+      return Err(BBError::Other(format!("Unsupported key algorithm for key '{}'", *self)));
+    }
+
     match self.alg {
-      KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512 => {
-        let mut verifier = self.verifier()?;
-        verifier
-          .update(payload)
-          .map_err(|e| BBError::DecodeError(format!("{:?}", e)))?;
-
-        match verifier
-          .verify(signature)
-          .map_err(|e| BBError::Other(format!("Failed to check RSA signature: {:?}", e)))?
-        {
-          true => Ok(true),
-          false => Err(BBError::SignatureInvalid()),
-        }
+      KeyAlgorithm::RS256
+      | KeyAlgorithm::RS384
+      | KeyAlgorithm::RS512
+      | KeyAlgorithm::ES256
+      | KeyAlgorithm::ES384
+      | KeyAlgorithm::EdDSA => {
+        let key =
+          ring::signature::UnparsedPublicKey::new(self.alg.verification(), self.key.as_ref());
+        key.verify(payload, signature).map_err(|_| BBError::SignatureInvalid)
       }
 
-      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => {
-        let ec_key = self.key.ec_key().map_err(|e| {
-          BBError::Other(format!("Failed to extract EC key from public key: {:?}", e))
-        })?;
-
-        let sig_len = signature.len();
-        if sig_len != self.alg.signature_length() {
-          return Err(BBError::SignatureInvalid());
-        }
-
-        /* Create Ecdsa signature from signature bytes */
-        let m = signature.len() / 2;
-
-        let r = BigNum::from_slice(&signature[..m])
-          .map_err(|e| BBError::Other(format!("Bignum error: {}", e)))?;
-        let s = BigNum::from_slice(&signature[m..sig_len])
-          .map_err(|e| BBError::Other(format!("Bignum error: {}", e)))?;
-        let sig = EcdsaSig::from_private_components(r, s)
-          .map_err(|e| BBError::Other(format!("Could not create Ecdsa Signature: {}", e)))?;
-
-        /* calculate signature from payload */
-        let digest = self
-          .alg
-          .message_digest()
-          .ok_or_else(|| BBError::Other("Unknown algorithm digest".to_string()))?;
-        let hash = hash(digest, payload)
-          .map_err(|e| BBError::Other(format!("Failed to hash payload: {}", e)))?;
-
-        Ok(
-          sig
-            .verify(&hash, &ec_key)
-            .map_err(|e| BBError::Other(format!("Failed to verify EC signature: {}", e)))?,
-        )
-      }
-
-      KeyAlgorithm::EdDSA => {
-        let mut verifier = Verifier::new_without_digest(&self.key)
-          .map_err(|e| BBError::Other(format!("Cannot get verifier for EdDSA: {}", e)))?;
-        Ok(
-          verifier
-            .verify_oneshot(signature, payload)
-            .map_err(|e| BBError::Other(format!("Failed to verify EdDSA signature: {}", e)))?,
-        )
-      }
-
-      _ => Err(BBError::Other(format!(
-        "Unsupported key algorithm for key '{}'",
-        *self
-      ))),
+      _ => Err(BBError::Other(format!("Unsupported key algorithm for key '{}'", *self))),
     }
   }
-
-  ///
-  /// Return an OpenSSL verifier using this key.
-  ///
-  pub fn verifier(&self) -> BBResult<Verifier> {
-    let verifier = match self.kty {
-      KeyType::RSA => {
-        /* Get message digest for the algorithm used */
-        let message_digest = self.alg.message_digest().ok_or_else(|| {
-          BBError::Other(format!("Failed to get message digest for key '{}'.", &self))
-        })?;
-        /* create verifier */
-        Verifier::new(message_digest, &self.key).map_err(|e| {
-          BBError::Other(format!(
-            "Failed to create verifier for RSA key '{}': {:?}",
-            &self, e
-          ))
-        })?
-      }
-
-      KeyType::EC => {
-        /* EC keys do not use a verifier */
-        return Err(BBError::Other("EC key has no verifier".to_string()));
-      }
-
-      KeyType::OKP => {
-        /* Ed does not use a message digest */
-        Verifier::new_without_digest(&self.key).map_err(|e| {
-          BBError::Other(format!(
-            "Failed to create verifier for Ed key '{}': {:?}",
-            &self, e
-          ))
-        })?
-      }
-
-      KeyType::Unsupported => {
-        return Err(BBError::Other(format!(
-          "Unsupported key type for key '{}'",
-          &self
-        )));
-      }
-    };
-
-    Ok(verifier)
-  }
 }
 
 ///
-/// Return config instance for base64 decoding of JWTs.
-///
-// pub fn base64_config() -> base64::Config {
-//   base64::URL_SAFE_NO_PAD.decode_allow_trailing_bits(true)
-// }
-
-///
-/// Create a BigNum from a base64 encoded string.
-///
-/// # Arguments
-///
-/// * `b64` - base64 encoded binary value; if None, an error is returned
-/// * `error_context` - a string to include in error messages
-///
-fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
-  let bytes = BASE64_ENGINE
-    .decode(b64)
-    .map_err(|e| BBError::DecodeError(format!("{error_context}: '{:?}'", e)))?;
-
-  BigNum::from_slice(&bytes).map_err(|e| {
-    BBError::DecodeError(format!(
-      "Failed to create number from b64 string ({error_context}): {}",
-      e
-    ))
-  })
-}
-
-///
-/// Create an OpenSSL-backed public key from a JWK.
-///
-/// This basically converts a JWK to a openssl::Pkey<Public>, wrapper in a [`BBKey`] struct.
+/// Create a [`BBKey`] from a JWK.
 ///
 /// # Arguments
 ///
@@ -454,99 +304,104 @@ fn bignum_from_base64(b64: &str, error_context: &str) -> BBResult<BigNum> {
 /// # Returns
 ///
 /// A PublicKey instance.
-///
 fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
-  let kid = if jwk.kid.is_some() {
-    jwk.kid.as_ref().unwrap()
-  } else {
-    "<no_kid>"
-  };
+  let kid = jwk.kid.as_deref().unwrap_or("<no_kid>").to_string();
 
   let key = match jwk.kty {
     KeyType::EC => {
-      /* get the curve name/id */
-      let nid = if jwk.crv.is_some() {
-        jwk.crv.as_ref().unwrap().nid()
-      } else {
-        None
+      /* ensure crv field */
+      if jwk.crv.is_none() {
+        return Err(BBError::JWKInvalid(format!("Missing 'crv' field for EC key '{kid}'")));
       }
-      .ok_or_else(|| {
-        BBError::JWKInvalid(format!(
-          "Missing or unsupported 'crv' field for EC key '{kid}'"
-        ))
-      })?;
-      let group = EcGroup::from_curve_name(nid).map_err(|e| {
-        BBError::JWKInvalid(format!(
-          "Cannot create EcGroup from nid {:?} for key {kid}: {}",
-          nid, e
-        ))
-      })?;
 
-      /* get point coordinates */
+      /* ensure point coordinates */
       if jwk.x.is_none() || jwk.y.is_none() {
-        return Err(BBError::JWKInvalid(format!(
-          "Missing x or y for EC key '{kid}'"
-        )));
+        return Err(BBError::JWKInvalid(format!("Missing x or y for EC key '{kid}'")));
       }
-      let x = bignum_from_base64(jwk.x.as_ref().unwrap(), "EC x")?;
-      let y = bignum_from_base64(jwk.y.as_ref().unwrap(), "EC y")?;
 
-      let ec_key = EcKey::from_public_key_affine_coordinates(&group, &x, &y)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create EcKey for {kid}': {}", e)))?;
-      PKey::from_ec_key(ec_key)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/EC for {kid}': {}", e)))?
+      let x = BASE64_ENGINE.decode(jwk.x.as_ref().unwrap())?;
+      let y = BASE64_ENGINE.decode(jwk.y.as_ref().unwrap())?;
+
+      let res = match jwk.crv.as_ref().unwrap() {
+        EcCurve::P256 => p256::EncodedPoint::from_affine_coordinates(
+          GenericArray::from_slice(&x),
+          GenericArray::from_slice(&y),
+          false,
+        )
+        .to_bytes()
+        .into(),
+        EcCurve::SECP256K1 => {
+          return Err(BBError::JWKInvalid(format!(
+            "Unsupported curve: SECP256K1 for EC key '{kid}'"
+          )));
+        }
+        EcCurve::P384 => p384::EncodedPoint::from_affine_coordinates(
+          GenericArray::from_slice(&x),
+          GenericArray::from_slice(&y),
+          false,
+        )
+        .to_bytes()
+        .into(),
+        EcCurve::P521 => {
+          return Err(BBError::JWKInvalid(format!("Unsupported curve P521 for EC key '{kid}'")));
+        }
+        EcCurve::Ed25519 => {
+          return Err(BBError::JWKInvalid(format!("Unsupported curve Ed25519 for EC key '{kid}'")));
+        }
+        EcCurve::Ed448 => {
+          return Err(BBError::JWKInvalid(format!("Unsupported curve Ed448 for EC key '{kid}'")));
+        }
+      };
+
+      res
     }
 
     KeyType::RSA => {
       if jwk.n.is_none() || jwk.e.is_none() {
-        return Err(BBError::JWKInvalid(format!(
-          "Missing n or e for RSA key '{kid}'"
-        )));
+        return Err(BBError::JWKInvalid(format!("Missing n or e for RSA key '{kid}'")));
       }
-      let n = bignum_from_base64(jwk.n.as_ref().unwrap(), "RSA n")?;
-      let e = bignum_from_base64(jwk.e.as_ref().unwrap(), "RSA e")?;
-      let rsa_key = Rsa::from_public_components(n, e)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create RSA key from {kid}: {}", e)))?;
-      PKey::from_rsa(rsa_key)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from {kid}: {}", e)))?
+
+      let n = BASE64_ENGINE.decode(jwk.n.as_ref().unwrap())?;
+      let e = BASE64_ENGINE.decode(jwk.e.as_ref().unwrap())?;
+
+      let n = der::asn1::UintRef::new(&n)
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid n for RSA key '{kid}'")))?;
+      let e = der::asn1::UintRef::new(&e)
+        .map_err(|_| BBError::JWKInvalid(format!("Invalid e for RSA key '{kid}'")))?;
+      let key = pkcs1::RsaPublicKey {
+        modulus: n, public_exponent: e
+      };
+      key
+        .to_der()
+        .map_err(|_| BBError::JWKInvalid(format!("DER encoding failed for RSA key '{kid}'")))?
     }
 
     KeyType::OKP => {
       /* OKP is Ed25519 or Ed448. Names, names, lots of names.
        * This public key type uses only the x coordinate on the elliptic curve */
       if jwk.x.is_none() {
-        return Err(BBError::JWKInvalid(format!(
-          "Missing x for OKP key '{kid}'"
-        )));
+        return Err(BBError::JWKInvalid(format!("Missing x for OKP key '{kid}'")));
       }
       let bytes = BASE64_ENGINE
         .decode(jwk.x.as_ref().unwrap())
         .map_err(|e| BBError::DecodeError(format!("Failed to decode x for {kid}: {}", e)))?;
-      let curve_id = match jwk.crv {
-        Some(EcCurve::Ed25519) => Id::ED25519,
-        Some(EcCurve::Ed448) => Id::ED448,
-        None => Id::ED25519,
+      match jwk.crv {
+        // `None` assumes `Ed25519`
+        Some(EcCurve::Ed25519) | Some(EcCurve::Ed448) | None => bytes,
         _ => {
-          return Err(BBError::JWKInvalid(format!(
-            "Invalid curve for OKP key {kid}"
-          )));
+          return Err(BBError::JWKInvalid(format!("Invalid curve for OKP key {kid}")));
         }
-      };
-
-      PKey::public_key_from_raw_bytes(&bytes, curve_id)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to read EdDSA key for {kid}: {}", e)))?
+      }
     }
 
     _ => {
-      return Err(BBError::JWKInvalid(format!(
-        "Unsupported keytype for {kid}"
-      )));
+      return Err(BBError::JWKInvalid(format!("Unsupported keytype for {kid}")));
     }
   };
 
   Ok(BBKey {
     kid: jwk.kid.clone(),
-    key,
+    key: key.into(),
     kty: jwk.kty.clone(),
     crv: jwk.crv.clone(),
     alg: jwk.alg.clone().unwrap_or_default(),
@@ -557,14 +412,13 @@ fn pubkey_from_jwk(jwk: &JWK) -> BBResult<BBKey> {
 impl KeyStore {
   ///
   /// Create a new, empty keyset.
-  ///
   pub async fn new() -> BBResult<Self> {
     Ok(KeyStore {
-      keyset: RwLock::new(Vec::new()),
-      url: None,
-      load_time: None,
+      keyset:        RwLock::new(Vec::new()),
+      url:           None,
+      load_time:     None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
-      reload_time: None,
+      reload_time:   None,
     })
   }
 
@@ -574,7 +428,6 @@ impl KeyStore {
   /// # Arguments
   ///
   /// * `surl`: URL to load the keys from.
-  ///
   pub async fn new_from_url(surl: &str) -> BBResult<Self> {
     /* make sure the URL is safe (https) */
     let url = Url::parse(surl)
@@ -585,11 +438,11 @@ impl KeyStore {
     }
 
     let mut ks = KeyStore {
-      keyset: RwLock::new(Vec::new()),
-      url: Some(url.to_string()),
-      load_time: None,
+      keyset:        RwLock::new(Vec::new()),
+      url:           Some(url.to_string()),
+      load_time:     None,
       reload_factor: RELOAD_INTERVAL_FACTOR,
-      reload_time: None,
+      reload_time:   None,
     };
 
     /* load keys from URL if applicable */
@@ -607,7 +460,6 @@ impl KeyStore {
   /// # Returns
   ///
   /// The cloned keyset or None if something goes wrong.
-  ///
   pub fn keyset(&self) -> BBResult<Vec<BBKey>> {
     if let Ok(keyset) = self.keyset.read() {
       Ok(keyset.clone())
@@ -620,7 +472,6 @@ impl KeyStore {
   /// Number of keys in keystore.
   ///
   /// If the keyset lock is poisoned (should never happen), this function returns 0.
-  ///
   pub fn keys_len(&self) -> usize {
     if let Ok(keyset) = self.keyset.read() {
       keyset.len()
@@ -635,7 +486,6 @@ impl KeyStore {
   /// # Arguments
   ///
   /// * `key_json` - JSON string containing a [`JWK`].
-  ///
   pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
     let key: JWK = serde_json::from_str(key_json)
       .map_err(|e| BBError::Other(format!("Failed to parse key JSON: {:?}", e)))?;
@@ -656,15 +506,21 @@ impl KeyStore {
   /// * `pem` - PEM encoded public RSA key
   /// * `kid` - optional key id
   /// * `alg` - algorithm, e.g. [`KeyAlgorithm::RS256`]
-  ///
   pub fn add_rsa_pem_key(&self, pem: &str, kid: Option<&str>, alg: KeyAlgorithm) -> BBResult<()> {
-    let rsa = openssl::rsa::Rsa::public_key_from_pem(pem.as_bytes())
+    if !matches!(alg, KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512) {
+      return Err(BBError::Other("Invalid algorithm for rsa key".to_string()));
+    }
+    let pem_key = PemEncodedKey::new(pem.as_bytes())
       .map_err(|e| BBError::Other(format!("Could not read RSA pem: {:?}", e)))?;
+
+    let key = pem_key
+      .as_rsa_key()
+      .map_err(|e| BBError::Other(format!("Failed to create RSA key from PEM: {:?}", e)))?
+      .to_owned();
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
-      key: PKey::from_rsa(rsa)
-        .map_err(|e| BBError::JWKInvalid(format!("Failed to create PKey/RSA from PEM: {}", e)))?,
+      key: key.into(),
       kty: KeyType::RSA,
       crv: None,
       alg,
@@ -689,7 +545,6 @@ impl KeyStore {
   /// * `kid` - optional key id
   /// * `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
   /// * `alg` - the algorithm, e.g. ES384
-  ///
   pub fn add_ec_pem_key(
     &self,
     pem: &str,
@@ -697,21 +552,33 @@ impl KeyStore {
     curve: EcCurve,
     alg: KeyAlgorithm,
   ) -> BBResult<()> {
-    let key = PKey::public_key_from_pem(pem.as_bytes())
-      .map_err(|e| BBError::Other(format!("Failed to read PEM EdDSA pub key: {}", e)))?;
-
     /* determine key type */
     let kty = match alg {
       KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => KeyType::EC,
       KeyAlgorithm::EdDSA => KeyType::OKP,
       _ => {
-        return Err(BBError::Other("Invalid algorithm for ec key".to_string()));
+        return Err(BBError::Other("Invalid algorithm for EdDSA/EC key".to_string()));
       }
+    };
+
+    let pem_key = PemEncodedKey::new(pem.as_bytes())
+      .map_err(|e| BBError::Other(format!("Could not read PEM EdDSA/EC pub key: {:?}", e)))?;
+
+    // Decode PEM content to DER. This is what `ring` (verification algorithm implementation)
+    // expects. However: currently, ring does not support Ed448.
+    // The `ed448_rust` crate expects a different format (`num_bigint::BigInt`, little-endian).
+    let key_data = match alg {
+      KeyAlgorithm::ES256 | KeyAlgorithm::ES384 | KeyAlgorithm::ES512 => pem_key
+        .as_ec_public_key()
+        .map_err(|e| BBError::Other(format!("PEM does not contain an EC public key: {:?}", e)))?,
+      _ => pem_key
+        .as_ed_public_key()
+        .map_err(|e| BBError::Other(format!("PEM does not contain an Ed public key: {:?}", e)))?,
     };
 
     let bbkey = BBKey {
       kid: kid.map(|v| v.to_string()),
-      key,
+      key: PublicKey(key_data.to_owned()),
       kty,
       alg,
       crv: Some(curve),
@@ -736,12 +603,9 @@ impl KeyStore {
   ///
   /// # Arguments
   /// * `kid` - the ID of the key. If None, the first key is returned.
-  ///
   pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<BBKey> {
-    let keyset = self
-      .keyset
-      .read()
-      .map_err(|_e| BBError::Fatal("The keyset lock is poisoned".to_string()))?;
+    let keyset =
+      self.keyset.read().map_err(|_e| BBError::Fatal("The keyset lock is poisoned".to_string()))?;
 
     let key = if let Some(kid) = kid {
       /* `kid` is Some; return key with specific ID */
@@ -755,9 +619,7 @@ impl KeyStore {
       key.ok_or_else(|| BBError::Other(format!("Could not find kid '{kid}' in keyset.")))?
     } else {
       /* `kid` is None; return first key in set */
-      keyset
-        .first()
-        .ok_or_else(|| BBError::Other("No keys in keyset".to_string()))?
+      keyset.first().ok_or_else(|| BBError::Other("No keys in keyset".to_string()))?
     };
 
     Ok(key.clone())
@@ -771,15 +633,14 @@ impl KeyStore {
   /// keys expire in 10 minutes, setting the reload interval to 0.75 will consider the keys
   /// to be expired after 7.5 minutes and the [`KeyStore::should_reload`] function returns true.
   ///
-  /// This method does **not** update the reload time. Call [`KeyStore::load_keys`] to force an update.
-  ///
+  /// This method does **not** update the reload time. Call [`KeyStore::load_keys`] to force an
+  /// update.
   pub fn set_reload_factor(&mut self, interval: f64) {
     self.reload_factor = interval;
   }
 
   ///
   /// Get the current fraction time to check for token reload time.
-  ///
   pub fn reload_factor(&self) -> f64 {
     self.reload_factor
   }
@@ -790,7 +651,6 @@ impl KeyStore {
   /// # Returns
   ///
   /// Time of initial load or None if the keys were never loaded.
-  ///
   pub fn load_time(&self) -> Option<SystemTime> {
     self.load_time
   }
@@ -799,7 +659,6 @@ impl KeyStore {
   /// Get the time at which the keys should be reloaded.
   ///
   /// See [`KeyStore::set_reload_factor`] for more info.
-  ///
   pub fn reload_time(&self) -> Option<SystemTime> {
     self.reload_time
   }
@@ -811,9 +670,8 @@ impl KeyStore {
   /// * Some(true) if keys should be reloaded.
   /// * Some(false) if keys need not to be reloaded
   /// * None if the key store does not have a reload time available. For example, the
-  ///    [`KeyStore::load_keys`] function was not called or the HTTP server did not provide a
-  ///    cache-control HTTP header.
-  ///
+  ///   [`KeyStore::load_keys`] function was not called or the HTTP server did not provide a
+  ///   cache-control HTTP header.
   pub fn should_reload_time(&self, time: SystemTime) -> Option<bool> {
     self.reload_time.map(|reload_time| reload_time <= time)
   }
@@ -827,7 +685,6 @@ impl KeyStore {
   /// * None if the key store does not have a reload time available. For example, the
   ///   [`KeyStore::load_keys`] function was not called or the HTTP server did not provide a
   ///   cache-control HTTP header.
-  ///
   pub fn should_reload(&self) -> Option<bool> {
     self.should_reload_time(SystemTime::now())
   }
@@ -836,7 +693,6 @@ impl KeyStore {
   /// Load/update keys from the keystore URL.
   ///
   /// Clients should call this function when [`KeyStore::should_reload`] returns true.
-  ///
   #[allow(clippy::await_holding_lock)]
   pub async fn load_keys(&mut self) -> BBResult<()> {
     let url = self
@@ -879,7 +735,7 @@ impl KeyStore {
       .write()
       .map_err(|e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e)))?;
 
-    /* convert all keys to OpenSSL types */
+    /* convert all keys to internal type and add them to the store */
     for key in keyset.keys {
       keys.push(pubkey_from_jwk(&key)?);
     }
@@ -904,7 +760,6 @@ impl KeyStore {
   /// # Arguments
   ///
   /// * `response` - response to read the cache-control HTTP header from
-  ///
   fn get_key_expiration_time(response: &mut reqwest::Response) -> Result<u64, ()> {
     let header = response.headers().get("cache-control").ok_or(())?;
     let cache_control = header.to_str().map_err(|_| ())?.to_lowercase();
@@ -927,7 +782,6 @@ impl KeyStore {
   ///
   /// # Arguments
   /// * `idp_discovery_url` - the URL to load the discovery info from.
-  ///
   pub async fn idp_certs_url(idp_discovery_url: &str) -> BBResult<String> {
     let info_json = reqwest::get(idp_discovery_url)
       .await
@@ -953,9 +807,7 @@ impl KeyStore {
     if let serde_json::Value::String(jwks_uri) = &info["jwks_uri"] {
       Ok(jwks_uri.to_string())
     } else {
-      Err(BBError::Other(
-        "No jwks_uri in IdP discovery info found".to_string(),
-      ))
+      Err(BBError::Other("No jwks_uri in IdP discovery info found".to_string()))
     }
   }
 
@@ -972,13 +824,9 @@ impl KeyStore {
   /// # Returns
   ///
   /// URL of discovery endpoint.
-  ///
   pub fn keycloak_discovery_url(host: &str, realm: &str) -> BBResult<String> {
     let mut info_url = Url::parse(host).map_err(|e| {
-      BBError::Other(format!(
-        "Invalid base URL for Keycloak discovery endpoint: {:?}",
-        e
-      ))
+      BBError::Other(format!("Invalid base URL for Keycloak discovery endpoint: {:?}", e))
     })?;
 
     /* Discovery info URL is built like this:
@@ -1008,7 +856,6 @@ impl KeyStore {
 ///
 /// * `hdr_value` - the header value (or string) to search for an assigned value
 /// * `name` - the name to look for before the assignment '='
-///
 fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
   /* search name */
   let mut p = hdr_value.find(name).ok_or(())?;
@@ -1050,17 +897,21 @@ fn assigned_header_value(hdr_value: &str, name: &str) -> Result<u64, ()> {
 
 mod tests {
 
-  use super::*;
-  use rand::seq::SliceRandom;
   use std::env;
   use std::fs::File;
   use std::io::Read;
   use std::path::Path;
 
+  use rand::seq::SliceRandom;
+
+  use super::*;
+
   ///
-  /// Utility function that returns the absolute path and file name to a file in the /tests/assets folder.
+  /// Utility function that returns the absolute path and file name to a file in the /tests/assets
+  /// folder.
   ///
-  /// This is copied from tests::bb_common; unfortunately, I do not know how to import/use code from there.
+  /// This is copied from tests::bb_common; unfortunately, I do not know how to import/use code from
+  /// there.
   ///
   /// # Arguments
   ///
@@ -1069,14 +920,10 @@ mod tests {
   /// # Returns
   ///
   /// Absolute path to the asset file.
-  ///
   pub fn path_to_asset_file(asset_name: &str) -> String {
-    let path = Path::new(
-      env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set")
-        .as_str(),
-    )
-    .join(format!("tests/assets/{asset_name}"));
+    let path =
+      Path::new(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set").as_str())
+        .join(format!("tests/assets/{asset_name}"));
 
     String::from(path.to_str().unwrap())
   }
@@ -1084,22 +931,17 @@ mod tests {
   #[test]
   ///
   /// Test for `keycloak_discovery_url`
-  ///
   fn test_keycloak_discovery_url() {
     /* Very simple, if not pathetic, test. Runs without accessing any keycloak instance :-) */
     let url = KeyStore::keycloak_discovery_url("https://host.tld", "testing");
-    assert_eq!(
-      url.unwrap(),
-      "https://host.tld/realms/testing/.well-known/openid-configuration"
-    )
+    assert_eq!(url.unwrap(), "https://host.tld/realms/testing/.well-known/openid-configuration")
   }
 
   ///
   /// Test for `assigned_header_value` function
-  ///
   #[test]
   fn test_header_value_parser() {
-    let test_strings = vec![
+    let test_strings = [
       "oriuehgueohgeor depp = 3485975dd",
       "depp=1,fellow",
       "depp = 22-dude",
@@ -1119,13 +961,10 @@ mod tests {
 
   ///
   /// Test keystore with local pub keys.
-  ///
   #[tokio::test]
   async fn test_keystore_local() {
     /* create empty keystore */
-    let mut ks = KeyStore::new()
-      .await
-      .expect("Failed to create empty keystore");
+    let mut ks = KeyStore::new().await.expect("Failed to create empty keystore");
 
     /* load a key from a local JSON file */
     let key_json_file = path_to_asset_file("pubkey.json");
@@ -1136,11 +975,8 @@ mod tests {
     /* add key to store 20 times */
     for i in 1..21 {
       /* add keys with patched kid */
-      ks.add_key(&data.replace(
-        "nOo3ZDrODXEK1jKWhXslHR_KXEg",
-        format!("bbjwt-test-{i}").as_str(),
-      ))
-      .expect("Failed to add key to keystore");
+      ks.add_key(&data.replace("nOo3ZDrODXEK1jKWhXslHR_KXEg", format!("bbjwt-test-{i}").as_str()))
+        .expect("Failed to add key to keystore");
     }
 
     assert_eq!(ks.keys_len(), 20);
@@ -1150,15 +986,12 @@ mod tests {
     assert!(key1.kid.unwrap() == "bbjwt-test-1");
 
     /* get some other key */
-    let k = ks
-      .key_by_id(Some("bbjwt-test-17"))
-      .expect("Failed to get key by ID");
+    let k = ks.key_by_id(Some("bbjwt-test-17")).expect("Failed to get key by ID");
     assert_eq!(k.kid.unwrap(), "bbjwt-test-17");
   }
 
   ///
   /// Test loading from an insecure URL.
-  ///
   #[tokio::test]
   async fn insecure_keyset_load() {
     /* Loading from non-https URL must be refused/fail */
@@ -1171,19 +1004,14 @@ mod tests {
 
   ///
   /// Test loading keys from a URL.
-  ///
   #[tokio::test]
   async fn test_load_keys() {
     /* ask Seattle for the location of their public key store :-) */
     let url = "https://login.microsoftonline.com/common/v2.0/.well-known/openid-configuration";
-    let ks_url = KeyStore::idp_certs_url(url)
-      .await
-      .expect("Failed to get keyset URL");
+    let ks_url = KeyStore::idp_certs_url(url).await.expect("Failed to get keyset URL");
 
     /* Test load keyset from URL */
-    let ks = KeyStore::new_from_url(&ks_url)
-      .await
-      .expect("Failed to load keystore");
+    let ks = KeyStore::new_from_url(&ks_url).await.expect("Failed to load keystore");
 
     /* test for expiration time */
     assert!(ks.load_time.is_some());
@@ -1198,25 +1026,15 @@ mod tests {
     let keyset = ks.keyset().unwrap();
 
     /* get a random key from the keyset */
-    let key = keyset
-      .choose(&mut rand::thread_rng())
-      .expect("Failed to get random key from keyset");
+    let key = keyset.choose(&mut rand::thread_rng()).expect("Failed to get random key from keyset");
 
     /* get its key id and try to get it from the store by key id */
-    let kid = key
-      .kid
-      .clone()
-      .expect("No kid in key; not an error, but spoils this test...");
+    let kid = key.kid.clone().expect("No kid in key; not an error, but spoils this test...");
     let k = ks.key_by_id(Some(&kid)).expect("Failed to get key by id");
     assert_eq!(k.kid.expect("Missing kid"), kid);
 
     /* get the first key */
-    let k1 = ks
-      .keyset()
-      .unwrap()
-      .first()
-      .expect("Failed to get first key")
-      .clone();
+    let k1 = ks.keyset().unwrap().first().expect("Failed to get first key").clone();
 
     /* get key without id; must return the first/something */
     let k = ks.key_by_id(None).expect("No key returned without kid");

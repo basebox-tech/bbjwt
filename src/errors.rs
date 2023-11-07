@@ -2,7 +2,6 @@
 //! Error definitions for bbjwt.
 //!
 //! Copyright (c) 2022 basebox GmbH
-//!
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
@@ -14,7 +13,6 @@ pub type BBResult<T> = Result<T, BBError>;
 
 ///
 /// Errors used in bbjwt
-///
 #[allow(dead_code)]
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum BBError {
@@ -52,7 +50,7 @@ pub enum BBError {
 
   #[error("Invalid signature")]
   /// The signature could not be verified.
-  SignatureInvalid(),
+  SignatureInvalid,
 
   #[error("Error: {0}")]
   /// Some other error.
@@ -66,19 +64,18 @@ pub enum BBError {
 impl BBError {
   ///
   /// Return name for each error variant.
-  ///
   pub fn name(&self) -> String {
     match self {
-      Self::NetworkError(..) => "NetworkError".to_string(),
-      Self::TokenInvalid(..) => "TokenInvalid".to_string(),
-      Self::URLInvalid(..) => "URLInvalid".to_string(),
-      Self::JWKInvalid(..) => "JWKInvalid".to_string(),
-      Self::Fatal(..) => "Fatal".to_string(),
-      Self::DecodeError(..) => "DecodeError".to_string(),
-      Self::JSONError(..) => "JSONError".to_string(),
-      Self::ClaimInvalid(..) => "ClaimInvalid".to_string(),
-      Self::SignatureInvalid(..) => "SignatureInvalid".to_string(),
-      Self::Other(..) => "Other".to_string(),
+      Self::NetworkError(_) => "NetworkError".to_string(),
+      Self::TokenInvalid(_) => "TokenInvalid".to_string(),
+      Self::URLInvalid(_) => "URLInvalid".to_string(),
+      Self::JWKInvalid(_) => "JWKInvalid".to_string(),
+      Self::Fatal(_) => "Fatal".to_string(),
+      Self::DecodeError(_) => "DecodeError".to_string(),
+      Self::JSONError(_) => "JSONError".to_string(),
+      Self::ClaimInvalid(_) => "ClaimInvalid".to_string(),
+      Self::SignatureInvalid => "SignatureInvalid".to_string(),
+      Self::Other(_) => "Other".to_string(),
       Self::Unknown => "Unknown".to_string(),
     }
   }
