@@ -13,6 +13,7 @@
 //! Copyright (c) 2022 basebox GmbH, all rights reserved.
 //!
 //! License: MIT
+//!
 
 /* --- uses ------------------------------------------------------------------------------------- */
 
@@ -30,6 +31,7 @@ use url::Url;
 
 use crate::errors::*;
 use crate::pem::decoder::PemEncodedKey;
+use crate::tls_ext::is_safe_url;
 
 /* --- constants -------------------------------------------------------------------------------- */
 
@@ -430,12 +432,9 @@ impl KeyStore {
     /* make sure the URL is safe (https) */
     let url = Url::parse(surl)
       .map_err(|e| BBError::URLInvalid(format!("Invalid keyset URL '{surl}: {:?}", e)))?;
-    let host = url
-      .host_str()
-      .ok_or_else(|| BBError::URLInvalid(format!("No host in keyset URL '{surl}")))?;
-    /* if the URL is not local, it must use TLS */
-    if !["localhost", "127.0.0.1"].contains(&host) && url.scheme() != "https" {
-      return Err(BBError::URLInvalid("Public keysets must be loaded via https.".to_string()));
+    /* the URL must be safe, i.e. either local or https */
+    if !is_safe_url(&url) {
+      return Err(BBError::URLInvalid("Public keysets must be loaded via a safe URL.".to_string()));
     }
 
     let mut ks = KeyStore {
