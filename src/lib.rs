@@ -21,8 +21,8 @@ use serde::Deserialize;
 
 pub mod errors;
 pub mod keystore;
-pub mod tls_ext;
 mod pem;
+pub mod tls_ext;
 
 /* --- types ------------------------------------------------------------------------------------ */
 
