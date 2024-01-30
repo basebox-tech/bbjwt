@@ -70,8 +70,9 @@ async fn validate_jwt_with_keystores(
 async fn unsupported_alg_jwt() {
   let ks = KeyStore::new().await.unwrap();
   ks.add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS256)
+    .await
     .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify valid token */
   let jwt = load_asset("id_token_unsupported_alg.txt");
@@ -85,11 +86,13 @@ async fn rsa256_valid_jwt() {
   let ks_good = KeyStore::new().await.unwrap();
   ks_good
     .add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS256)
+    .await
     .expect("Failed to add RSA384 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
   ks_bad
     .add_rsa_pem_key(&load_asset("rsa.wrong.pub.key"), Some("key-1"), KeyAlgorithm::RS256)
+    .await
     .expect("Failed to add RSA384 key");
 
   validate_jwt_with_keystores("id_token_rsa256.txt", &ks_good, &ks_bad).await;
@@ -101,8 +104,9 @@ async fn rsa256_valid_jwt() {
 async fn rsa256_invalid_claims_expired_jwt() {
   let ks = KeyStore::new().await.unwrap();
   ks.add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS256)
+    .await
     .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify expired token, must fail */
   let jwt = load_asset("id_token_rsa256_expired.txt");
@@ -131,8 +135,9 @@ async fn rsa256_invalid_claims_expired_jwt() {
 async fn rsa256_valid_claims_expired_jwt() {
   let ks = KeyStore::new().await.unwrap();
   ks.add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS256)
+    .await
     .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify expired token, must fail */
   let jwt = load_asset("id_token_rsa256_expired.txt");
@@ -146,11 +151,13 @@ async fn rsa384_valid_jwt() {
   let ks_good = KeyStore::new().await.unwrap();
   ks_good
     .add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS384)
+    .await
     .expect("Failed to add RSA384 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
   ks_bad
     .add_rsa_pem_key(&load_asset("rsa.wrong.pub.key"), Some("key-1"), KeyAlgorithm::RS384)
+    .await
     .expect("Failed to add RSA384 key");
 
   validate_jwt_with_keystores("id_token_rsa384.txt", &ks_good, &ks_bad).await;
@@ -162,8 +169,9 @@ async fn rsa384_valid_jwt() {
 async fn rsa512_valid_jwt() {
   let ks = KeyStore::new().await.unwrap();
   ks.add_rsa_pem_key(&load_asset("rsa.pub.key"), Some("key-1"), KeyAlgorithm::RS512)
+    .await
     .expect("Failed to add RSA key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify valid token */
   let jwt = load_asset("id_token_rsa512.txt");
@@ -179,6 +187,7 @@ async fn es256_valid_jwt() {
   let ks_good = KeyStore::new().await.unwrap();
   ks_good
     .add_ec_pem_key(&load_asset("ec256.pub.key"), Some("key-1"), EcCurve::P256, KeyAlgorithm::ES256)
+    .await
     .expect("Failed to add ec256 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
@@ -189,6 +198,7 @@ async fn es256_valid_jwt() {
       EcCurve::P256,
       KeyAlgorithm::ES256,
     )
+    .await
     .expect("Failed to add EC256 key");
 
   validate_jwt_with_keystores("id_token_es256.txt", &ks_good, &ks_bad).await;
@@ -206,8 +216,9 @@ async fn es256_expired_jwt() {
     EcCurve::P256,
     KeyAlgorithm::ES256,
   )
+  .await
   .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify valid token */
   let jwt = load_asset("id_token_es256_expired.txt");
@@ -226,8 +237,9 @@ async fn es256_signature_invalid_jwt() {
     EcCurve::P256,
     KeyAlgorithm::ES256,
   )
+  .await
   .expect("Failed to add EC key");
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* verify valid token */
   let jwt = load_asset("id_token_es256_signature_invalid.txt");
@@ -241,6 +253,7 @@ async fn es384_valid_jwt() {
   let ks_good = KeyStore::new().await.unwrap();
   ks_good
     .add_ec_pem_key(&load_asset("ec384.pub.key"), Some("key-1"), EcCurve::P384, KeyAlgorithm::ES384)
+    .await
     .expect("Failed to add ec384 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
@@ -251,6 +264,7 @@ async fn es384_valid_jwt() {
       EcCurve::P384,
       KeyAlgorithm::ES384,
     )
+    .await
     .expect("Failed to add EC384 key");
 
   validate_jwt_with_keystores("id_token_es384.txt", &ks_good, &ks_bad).await;
@@ -268,6 +282,7 @@ async fn ed25519_valid_jwt() {
       EcCurve::Ed25519,
       KeyAlgorithm::EdDSA,
     )
+    .await
     .expect("Failed to add Ed25519 key");
 
   let ks_bad = KeyStore::new().await.unwrap();
@@ -278,6 +293,7 @@ async fn ed25519_valid_jwt() {
       EcCurve::Ed25519,
       KeyAlgorithm::EdDSA,
     )
+    .await
     .expect("Failed to add Ed25519 key");
 
   validate_jwt_with_keystores("id_token_ed25519.txt", &ks_good, &ks_bad).await;
@@ -289,15 +305,15 @@ async fn ed25519_valid_jwt() {
 async fn load_ed25519_jwk() {
   let mut ks = KeyStore::new().await.unwrap();
   let jwk_json = load_asset("ed25519.pub.jwk.json");
-  ks.add_key(&jwk_json).unwrap();
+  ks.add_key(&jwk_json).await.unwrap();
 
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* get the key by name */
-  ks.key_by_id(Some("key-1")).unwrap();
+  ks.key_by_id(Some("key-1")).await.unwrap();
 
   /* get key with wrong name, must fail */
-  assert!(ks.key_by_id(Some("No-key-with-that-name")).is_err());
+  assert!(ks.key_by_id(Some("No-key-with-that-name")).await.is_err());
 }
 
 ///
@@ -306,13 +322,13 @@ async fn load_ed25519_jwk() {
 async fn load_ec_jwk() {
   let mut ks = KeyStore::new().await.unwrap();
   let jwk_json = load_asset("ec256.pub.jwk.json");
-  ks.add_key(&jwk_json).unwrap();
+  ks.add_key(&jwk_json).await.unwrap();
 
-  assert_eq!(ks.keys_len(), 1);
+  assert_eq!(ks.keys_len().await, 1);
 
   /* get the key by name */
-  ks.key_by_id(Some("ec2561")).unwrap();
+  ks.key_by_id(Some("ec2561")).await.unwrap();
 
   /* get key with wrong name, must fail */
-  assert!(ks.key_by_id(Some("No-key-with-that-name")).is_err());
+  assert!(ks.key_by_id(Some("No-key-with-that-name")).await.is_err());
 }

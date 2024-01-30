@@ -187,7 +187,7 @@ pub async fn validate_jwt(
   }
 
   /* get public key for signature validation */
-  let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref())?;
+  let pubkey = keystore.key_by_id(kid_hdr.kid.as_deref()).await?;
 
   /* First, we verify the signature. */
   check_jwt_signature(&parts, &pubkey)?;

@@ -118,7 +118,7 @@ async fn main() {
     ... abbreviated ...,
   }"#;
   // Add the key
-  keystore.add_key(json_key);
+  keystore.add_key(json_key).await;
 
   let pem_key = r#"-----BEGIN PUBLIC KEY-----
 ..."#;
@@ -128,7 +128,7 @@ async fn main() {
     pem_key,
     Some("key-rsa"),
     KeyAlgorithm::RS256
-  ).unwrap();
+  ).await.unwrap();
 
   // Load a EC key from a PEM buffer
   keystore.add_ec_pem_key(
@@ -136,7 +136,7 @@ async fn main() {
     Some("key-ec"),
     EcCurve::P256,
     KeyAlgorithm::ES256
-  ).unwrap();
+  ).await.unwrap();
 
   // Load EdDSA key from a PEM buffer
   keystore.add_ec_pem_key(
@@ -144,7 +144,7 @@ async fn main() {
     Some("key-ed"),
     EcCurve::Ed25519,
     KeyAlgorithm::EdDSA
-  ).unwrap();
+  ).await.unwrap();
 
   // You can add more keys; in this case, the keys should have an ID and the JWT to be
   // validated should have a "kid" claim. Otherwise, bbjwt uses the first key in the set.
