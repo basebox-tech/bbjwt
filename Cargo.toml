@@ -1,6 +1,6 @@
 [package]
 name = "bbjwt"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -25,6 +25,7 @@ p384 = "0.13.0"
 p256 = "0.13.2"
 pkcs1 = { version = "0.7.5", features = ["std"] }
 der = { version = "0.7.8", features = ["alloc"] }
+tokio = { version = "1.35", features = ["sync"] }
 
 [dev-dependencies]
 rand = "0.8"

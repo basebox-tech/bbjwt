@@ -17,7 +17,6 @@
 /* --- uses ------------------------------------------------------------------------------------- */
 
 use std::fmt::{self};
-use std::sync::RwLock;
 use std::time::{Duration, SystemTime};
 
 use base64::Engine;
@@ -26,6 +25,7 @@ use p256::elliptic_curve::generic_array::GenericArray;
 use ring::digest;
 use ring::signature::VerificationAlgorithm;
 use serde::Deserialize;
+use tokio::sync::RwLock;
 use url::Url;
 
 use crate::errors::*;
@@ -459,25 +459,17 @@ impl KeyStore {
   ///
   /// # Returns
   ///
-  /// The cloned keyset or None if something goes wrong.
-  pub fn keyset(&self) -> BBResult<Vec<BBKey>> {
-    if let Ok(keyset) = self.keyset.read() {
-      Ok(keyset.clone())
-    } else {
-      Err(BBError::Fatal("Keyset lock is poisoned".to_string()))
-    }
+  /// The cloned keyset.
+  pub async fn keyset(&self) -> Vec<BBKey> {
+    let keyset = self.keyset.read().await;
+    keyset.clone()
   }
 
   ///
   /// Number of keys in keystore.
-  ///
-  /// If the keyset lock is poisoned (should never happen), this function returns 0.
-  pub fn keys_len(&self) -> usize {
-    if let Ok(keyset) = self.keyset.read() {
-      keyset.len()
-    } else {
-      0
-    }
+  pub async fn keys_len(&self) -> usize {
+    let keyset = self.keyset.read().await;
+    keyset.len()
   }
 
   ///
@@ -486,14 +478,11 @@ impl KeyStore {
   /// # Arguments
   ///
   /// * `key_json` - JSON string containing a [`JWK`].
-  pub fn add_key(&mut self, key_json: &str) -> BBResult<()> {
+  pub async fn add_key(&mut self, key_json: &str) -> BBResult<()> {
     let key: JWK = serde_json::from_str(key_json)
       .map_err(|e| BBError::Other(format!("Failed to parse key JSON: {:?}", e)))?;
 
-    let mut keyset = self
-      .keyset
-      .write()
-      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    let mut keyset = self.keyset.write().await;
     keyset.push(pubkey_from_jwk(&key)?);
     Ok(())
   }
@@ -506,7 +495,12 @@ impl KeyStore {
   /// * `pem` - PEM encoded public RSA key
   /// * `kid` - optional key id
   /// * `alg` - algorithm, e.g. [`KeyAlgorithm::RS256`]
-  pub fn add_rsa_pem_key(&self, pem: &str, kid: Option<&str>, alg: KeyAlgorithm) -> BBResult<()> {
+  pub async fn add_rsa_pem_key(
+    &self,
+    pem: &str,
+    kid: Option<&str>,
+    alg: KeyAlgorithm,
+  ) -> BBResult<()> {
     if !matches!(alg, KeyAlgorithm::RS256 | KeyAlgorithm::RS384 | KeyAlgorithm::RS512) {
       return Err(BBError::Other("Invalid algorithm for rsa key".to_string()));
     }
@@ -526,10 +520,7 @@ impl KeyStore {
       alg,
     };
 
-    let mut keyset = self
-      .keyset
-      .write()
-      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    let mut keyset = self.keyset.write().await;
     keyset.push(bbkey);
     Ok(())
   }
@@ -545,7 +536,7 @@ impl KeyStore {
   /// * `kid` - optional key id
   /// * `curve` - the Ed curve (Ed448 or Ed25519) or EC curve (P256, P384, P521)
   /// * `alg` - the algorithm, e.g. ES384
-  pub fn add_ec_pem_key(
+  pub async fn add_ec_pem_key(
     &self,
     pem: &str,
     kid: Option<&str>,
@@ -584,10 +575,7 @@ impl KeyStore {
       crv: Some(curve),
     };
 
-    let mut keyset = self
-      .keyset
-      .write()
-      .map_err(|e| BBError::Other(format!("Failed to get write lock on keyset: {:?}", e)))?;
+    let mut keyset = self.keyset.write().await;
     keyset.push(bbkey);
     Ok(())
   }
@@ -603,9 +591,8 @@ impl KeyStore {
   ///
   /// # Arguments
   /// * `kid` - the ID of the key. If None, the first key is returned.
-  pub fn key_by_id(&self, kid: Option<&str>) -> BBResult<BBKey> {
-    let keyset =
-      self.keyset.read().map_err(|_e| BBError::Fatal("The keyset lock is poisoned".to_string()))?;
+  pub async fn key_by_id(&self, kid: Option<&str>) -> BBResult<BBKey> {
+    let keyset = self.keyset.read().await;
 
     let key = if let Some(kid) = kid {
       /* `kid` is Some; return key with specific ID */
@@ -693,7 +680,6 @@ impl KeyStore {
   /// Load/update keys from the keystore URL.
   ///
   /// Clients should call this function when [`KeyStore::should_reload`] returns true.
-  #[allow(clippy::await_holding_lock)]
   pub async fn load_keys(&mut self) -> BBResult<()> {
     let url = self
       .url
@@ -701,17 +687,7 @@ impl KeyStore {
       .ok_or_else(|| BBError::Other("No load URL for keyset provided.".to_string()))?;
 
     /* No keys are better than expired keys: clear keys first. */
-    let mut keys = self
-      .keyset
-      .write()
-      .map_err(|e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e)))?;
-    keys.clear();
-    /* drop the cache write lock so we do not hold it during the refresh request.
-     * Note: Clippy emits a false positive about a lock being held while an async
-     * function is being awaited. The lock is dropped explicitly here.
-     * See here https://github.com/rust-lang/rust-clippy/issues/9208
-     */
-    drop(keys);
+    self.keyset.write().await.clear();
 
     let mut response = reqwest::get(&url)
       .await
@@ -730,10 +706,8 @@ impl KeyStore {
     let keyset: JWKS = serde_json::from_str(&json)
       .map_err(|e| BBError::Other(format!("Failed to parse IdP public key set: {:?}", e)))?;
 
-    let mut keys = self
-      .keyset
-      .write()
-      .map_err(|e| BBError::Fatal(format!("Keyset write lock is poisoned: {}", e)))?;
+    /* acquire write lock on keys */
+    let mut keys = self.keyset.write().await;
 
     /* convert all keys to internal type and add them to the store */
     for key in keyset.keys {
@@ -976,17 +950,18 @@ mod tests {
     for i in 1..21 {
       /* add keys with patched kid */
       ks.add_key(&data.replace("nOo3ZDrODXEK1jKWhXslHR_KXEg", format!("bbjwt-test-{i}").as_str()))
+        .await
         .expect("Failed to add key to keystore");
     }
 
-    assert_eq!(ks.keys_len(), 20);
+    assert_eq!(ks.keys_len().await, 20);
 
     /* get first key */
-    let key1 = ks.key_by_id(None).expect("Failed to get key just added");
+    let key1 = ks.key_by_id(None).await.expect("Failed to get key just added");
     assert!(key1.kid.unwrap() == "bbjwt-test-1");
 
     /* get some other key */
-    let k = ks.key_by_id(Some("bbjwt-test-17")).expect("Failed to get key by ID");
+    let k = ks.key_by_id(Some("bbjwt-test-17")).await.expect("Failed to get key by ID");
     assert_eq!(k.kid.unwrap(), "bbjwt-test-17");
   }
 
@@ -1027,23 +1002,23 @@ mod tests {
     println!("KeyStore: {:?}", ks);
 
     /* Test keys length; should be > 0 */
-    assert!(ks.keys_len() > 0);
+    assert!(ks.keys_len().await > 0);
 
-    let keyset = ks.keyset().unwrap();
+    let keyset = ks.keyset().await;
 
     /* get a random key from the keyset */
     let key = keyset.choose(&mut rand::thread_rng()).expect("Failed to get random key from keyset");
 
     /* get its key id and try to get it from the store by key id */
     let kid = key.kid.clone().expect("No kid in key; not an error, but spoils this test...");
-    let k = ks.key_by_id(Some(&kid)).expect("Failed to get key by id");
+    let k = ks.key_by_id(Some(&kid)).await.expect("Failed to get key by id");
     assert_eq!(k.kid.expect("Missing kid"), kid);
 
     /* get the first key */
-    let k1 = ks.keyset().unwrap().first().expect("Failed to get first key").clone();
+    let k1 = ks.keyset().await.first().expect("Failed to get first key").clone();
 
     /* get key without id; must return the first/something */
-    let k = ks.key_by_id(None).expect("No key returned without kid");
+    let k = ks.key_by_id(None).await.expect("No key returned without kid");
     /* kid must match the kid of the first key */
     assert_eq!(k.kid.unwrap().as_str(), k1.kid.unwrap().as_str());
   }
