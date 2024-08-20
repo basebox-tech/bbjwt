@@ -1,6 +1,6 @@
 [package]
 name = "bbjwt"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -16,7 +16,7 @@ thiserror = "1.0"
 base64 = "0.21"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-reqwest = { version = "0.11" }
+reqwest = { version = "0.12" }
 ring = { version = "0.16.20", features = ["std"] }
 simple_asn1 = "0.6.2"
 pem = "3.0.1"
@@ -30,5 +30,5 @@ tokio = { version = "1.35", features = ["sync"] }
 [dev-dependencies]
 rand = "0.8"
 tokio = { version = "1.24.1", features = ["full", "time", "macros"] }
-color-backtrace = "0.5.1"
+color-backtrace = "*"
 env_logger = "0.10"

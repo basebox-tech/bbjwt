@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+# 0.4.1
+  - Dependency updates to fix rustsec audit issues
+
 # 0.4.0
   - changed the keyset (in the KeyStore struct) to use tokio::sync::RwLock (instead of std::sync::RwLock). The tokio::sync::RwLock "is fair (or write-preferring), in order to ensure that readers cannot starve writers". This also removes the possibility of deadlocks due to panics (albeit unlikely regardless). As a result, several functions in keystore.rs have now become async. 
 
