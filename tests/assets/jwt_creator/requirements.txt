@@ -1,1 +1,1 @@
-jwcrypto==1.5.3
+jwcrypto==1.5.6
