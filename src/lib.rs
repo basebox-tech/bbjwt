@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 pub use errors::{BBError, BBResult};
-use keystore::{BBKey, BASE64_ENGINE};
+use keystore::{BASE64_ENGINE, BBKey};
 pub use keystore::{EcCurve, KeyAlgorithm, KeyStore};
 use serde::Deserialize;
 

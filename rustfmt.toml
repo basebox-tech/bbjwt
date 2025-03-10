@@ -18,7 +18,8 @@ use_small_heuristics = "Max"
 
 # Unstable features below
 unstable_features = true
-version = "Two"
+style_edition = "2024"
+
 # code can be 100 characters, why not comments?
 wrap_comments = true
 comment_width = 100

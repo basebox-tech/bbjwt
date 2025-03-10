@@ -19,7 +19,7 @@ use std::io::Read;
 
 use bb_common::*;
 use bbjwt::keystore::{EcCurve, KeyAlgorithm};
-use bbjwt::{default_validations, validate_jwt, KeyStore};
+use bbjwt::{KeyStore, default_validations, validate_jwt};
 
 const ISS: &str = "https://kc.basebox.health/realms/testing";
 
